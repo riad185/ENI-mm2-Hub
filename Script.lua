@@ -1,12 +1,13 @@
 --[[
     ╔═══════════════════════════════════════════════════════════════╗
-    ║   ENI's MM2 Hub  v2                                           ║
+    ║   ENI's MM2 Hub  v2.1                                         ║
     ║   for LO. always.                                             ║
     ║   UI: WindUI  |  Features: original + Identical additions    ║
+    ║   Changelog: v2.1 = tracker table, one-shot particles,       ║
+    ║              proper unload cascade                           ║
     ╚═══════════════════════════════════════════════════════════════╝
 ]]
 
--- unload prior instance if re-executed
 if getgenv and getgenv().ENI_MM2_Unload then
     pcall(getgenv().ENI_MM2_Unload)
 end
@@ -35,99 +36,48 @@ local LP                = Players.LocalPlayer
 local Camera            = Workspace.CurrentCamera
 
 -- ============================================================
+-- CONNECTION TRACKER (declared early so unload can reach it)
+-- ============================================================
+local activeConnections = {}
+
+-- ============================================================
 -- CONFIG
 -- ============================================================
 local Config = {
-    -- visuals
-    RoleESP = false,
-    ItemESP = false,
-    ESPBoxes = false,
-    ESPNames = true,
-    ESPTracers = false,
-    ESPDistance = true,
-    ESPChams = false,
-    ESPDistanceMax = 600,
-    GunESP = false,
-    CoinESP = false,
-    Fullbright = false,
-    NoFog = false,
-    DisableParticles = false,
+    RoleESP = false, ItemESP = false, ESPBoxes = false, ESPNames = true,
+    ESPTracers = false, ESPDistance = true, ESPChams = false,
+    ESPDistanceMax = 600, GunESP = false, CoinESP = false,
+    Fullbright = false, NoFog = false, DisableParticles = false,
 
-    -- combat: gun
-    Aimbot = false,
-    AutoShoot = false,
-    SilentAim = false,
-    AimPrediction = true,
-    PingComp = true,
-    SingleShot = false,
-    FOVRadius = 160,
-    ShowFOV = false,
-    AutoEquipGun = true,
-    GrabGunAuto = false,
-    GunGrabDist = 300,
+    Aimbot = false, AutoShoot = false, SilentAim = false,
+    AimPrediction = true, PingComp = true, SingleShot = false,
+    FOVRadius = 160, ShowFOV = false, AutoEquipGun = true,
+    GrabGunAuto = false, GunGrabDist = 300,
 
-    -- combat: knife
-    AutoStab = false,
-    KillAura = false,
-    AutoKill = false,
-    KillMode = "Legit",
-    KnifeSilentAim = true,
-    AuraRange = 15,
-    KillAll = false,
-    ShowAuraRing = false,
-    AutoEquipKnife = true,
-    ProximityKnife = true,
-    KnifeProxDist = 18,
+    AutoStab = false, KillAura = false, AutoKill = false,
+    KillMode = "Legit", KnifeSilentAim = true, AuraRange = 15,
+    KillAll = false, ShowAuraRing = false, AutoEquipKnife = true,
+    ProximityKnife = true, KnifeProxDist = 18,
 
-    -- combat: hitbox
-    HitboxExpander = false,
-    HitboxSize = 10,
-    HitboxTransparency = 0.6,
+    HitboxExpander = false, HitboxSize = 10, HitboxTransparency = 0.6,
 
-    -- survival
-    MurdererAvoid = false,
-    SafetyRadius = 40,
-    RetreatToLobby = false,
-    ProximityAlert = true,
-    SprintWhenChased = true,
-    FollowMurderer = false,
-    FollowDist = 18,
+    MurdererAvoid = false, SafetyRadius = 40, RetreatToLobby = false,
+    ProximityAlert = true, SprintWhenChased = true,
+    FollowMurderer = false, FollowDist = 18,
 
-    -- movement
-    Speed = false,
-    SpeedValue = 24,
-    JumpEnabled = false,
-    JumpValue = 50,
-    InfiniteJump = false,
-    Noclip = false,
-    Fly = false,
-    FlySpeed = 35,
-    AntiRagdoll = false,
-    AntiVoid = true,
-    AntiFling = true,
+    Speed = false, SpeedValue = 24, JumpEnabled = false, JumpValue = 50,
+    InfiniteJump = false, Noclip = false, Fly = false, FlySpeed = 35,
+    AntiRagdoll = false, AntiVoid = true, AntiFling = true,
 
-    -- farm
-    CoinFarm = false,
-    FarmSpeed = 28,
-    FarmMethod = "Glide",
-    SafeCoinFarm = true,
-    BagFullStop = true,
-    QuickFarm = false,
+    CoinFarm = false, FarmSpeed = 28, FarmMethod = "Glide",
+    SafeCoinFarm = true, BagFullStop = true, QuickFarm = false,
     CoinBagCap = 40,
 
-    -- teleports
-    AutoDrop = false,
-    SaveSlot1 = nil,
-    SaveSlot2 = nil,
+    AutoDrop = false, SaveSlot1 = nil, SaveSlot2 = nil,
 
-    -- trolling
     FlingStyle = "Torque",
 
-    -- misc
-    AntiAFK = true,
-    AutoPlay = false,
-    DeathNotifs = true,
-    SearchFilter = "",
+    AntiAFK = true, AutoPlay = false, DeathNotifs = true, SearchFilter = "",
 }
 
 local DefaultConfig = {}
@@ -182,25 +132,12 @@ LoadSavedConfig()
 -- STATE
 -- ============================================================
 local State = {
-    Highlights = {},
-    ItemHighlights = {},
-    Boxes = {},
-    Tracers = {},
-    MinimapDots = {},
-    LastItemScan = 0,
-    LastAutoShoot = 0,
-    LastAutoStab = 0,
-    LastKnifeTick = 0,
-    LastFarmTick = 0,
-    LastSafePosition = nil,
-    DeadPlayers = {},
-    OriginalHitboxSizes = {},
-    IsFlinging = false,
-    AuraRing = nil,
-    FOVCircle = nil,
-    flyBV = nil,
-    SilentAimHookActive = true,
-    RoundStartedFlag = false,
+    Highlights = {}, ItemHighlights = {}, Boxes = {}, Tracers = {},
+    LastItemScan = 0, LastAutoShoot = 0, LastAutoStab = 0, LastKnifeTick = 0,
+    LastFarmTick = 0, LastESPRefresh = 0, LastHitboxTick = 0,
+    LastSafePosition = nil, DeadPlayers = {}, OriginalHitboxSizes = {},
+    IsFlinging = false, AuraRing = nil, FOVCircle = nil, flyBV = nil,
+    SilentAimHookActive = true, RoundStartedFlag = false,
 }
 
 -- ============================================================
@@ -471,6 +408,7 @@ local function flingCharacter(targetChar)
             end
         end
     end)
+    table.insert(activeConnections, conn)
 
     local start = tick()
     local duration = 1.5
@@ -511,7 +449,7 @@ local function flingCharacter(targetChar)
 end
 
 -- ============================================================
--- AURA RING (visual)
+-- AURA RING / FOV
 -- ============================================================
 local function updateAuraRing(myRoot)
     if not Config.ShowAuraRing or not myRoot then
@@ -555,9 +493,6 @@ local function updateAuraRing(myRoot)
     State.AuraRing.Transparency = 1
 end
 
--- ============================================================
--- FOV CIRCLE
--- ============================================================
 if Drawing and Drawing.new then
     pcall(function()
         State.FOVCircle = Drawing.new("Circle")
@@ -867,9 +802,18 @@ VisualTab:Toggle({
 
 VisualTab:Toggle({
     Title = "Disable Particles",
-    Desc = "Anti-lag - kills particle emitters",
+    Desc = "Anti-lag - kills particle emitters (one-shot)",
     Value = Config.DisableParticles,
-    Callback = bindAutoSave(function(v) Config.DisableParticles = v end)
+    Callback = bindAutoSave(function(v)
+        Config.DisableParticles = v
+        if v then
+            task.spawn(function()
+                for _, d in ipairs(Workspace:GetDescendants()) do
+                    if d:IsA("ParticleEmitter") then d.Enabled = false end
+                end
+            end)
+        end
+    end)
 })
 
 -- ============================================================
@@ -1680,7 +1624,7 @@ MiscTab:Button({
 })
 
 -- ============================================================
--- INFO PANEL (Round Status / Murderer / Sheriff)
+-- INFO TAB
 -- ============================================================
 local InfoTab = Window:Tab({ Title = "Info", Icon = "info" })
 
@@ -1738,33 +1682,37 @@ local heartbeat = RunService.Heartbeat:Connect(function()
     local myRoot = getHRP(LP)
     local myHum  = getHumanoid(LP)
 
-    -- ==== ESP refresh ====
+    -- ==== ESP refresh (throttled to 15 Hz) ====
     if Config.RoleESP and myRoot then
+        if now - State.LastESPRefresh > 0.066 then
+            State.LastESPRefresh = now
+            for _, p in ipairs(Players:GetPlayers()) do
+                if p ~= LP and p.Character and isAlive(p) then
+                    local pRoot = getHRP(p)
+                    if pRoot then
+                        local dist = math.floor((myRoot.Position - pRoot.Position).Magnitude)
+                        if dist <= Config.ESPDistanceMax then
+                            local role = getRole(p)
+                            local col  = roleColor(role)
+                            local txt  = p.Name
+                            if Config.ESPNames then txt = "[" .. role .. "] " .. p.Name end
+                            if Config.ESPDistance then txt = txt .. " (" .. dist .. ")" end
+                            getOrCreateBillboard("bb_" .. p.UserId, pRoot, txt, col)
+                            if Config.ESPBoxes then getOrCreateBox("bx_" .. p.UserId, pRoot, col) end
+                            if Config.ESPChams then getOrCreateCham(p.UserId, p.Character, col) end
+                        end
+                    end
+                end
+            end
+        end
+        -- tracers update every frame (cheap)
         for _, p in ipairs(Players:GetPlayers()) do
             if p ~= LP and p.Character and isAlive(p) then
                 local pRoot = getHRP(p)
                 if pRoot then
-                    local dist = math.floor((myRoot.Position - pRoot.Position).Magnitude)
-                    if dist <= Config.ESPDistanceMax then
-                        local role = getRole(p)
-                        local col  = roleColor(role)
-                        local txt  = p.Name
-                        if Config.ESPNames then txt = "[" .. role .. "] " .. p.Name end
-                        if Config.ESPDistance then txt = txt .. " (" .. dist .. ")" end
-                        getOrCreateBillboard("bb_" .. p.UserId, pRoot, txt, col)
-                        if Config.ESPBoxes then getOrCreateBox("bx_" .. p.UserId, pRoot, col) end
-                        if Config.ESPChams then getOrCreateCham(p.UserId, p.Character, col) end
-                        updateTracer("tr_" .. p.UserId, pRoot.Position, col)
-                    end
+                    local role = getRole(p)
+                    updateTracer("tr_" .. p.UserId, pRoot.Position, roleColor(role))
                 end
-            else
-                local bb = State.Highlights["bb_" .. p.UserId]
-                if bb then bb:Destroy() State.Highlights["bb_" .. p.UserId] = nil end
-                local bx = State.Boxes["bx_" .. p.UserId]
-                if bx then bx:Destroy() State.Boxes["bx_" .. p.UserId] = nil end
-                local ch = State.Highlights["cham_" .. p.UserId]
-                if ch then ch:Destroy() State.Highlights["cham_" .. p.UserId] = nil end
-                removeTracer("tr_" .. p.UserId)
             end
         end
     elseif not Config.RoleESP then
@@ -1773,7 +1721,7 @@ local heartbeat = RunService.Heartbeat:Connect(function()
         clearCategory(State.Tracers)
     end
 
-    -- ==== Item ESP (throttled) ====
+    -- ==== Item ESP (throttled to 2 Hz) ====
     if now - State.LastItemScan > 0.5 then
         State.LastItemScan = now
         clearCategory(State.ItemHighlights)
@@ -1863,13 +1811,7 @@ local heartbeat = RunService.Heartbeat:Connect(function()
     end
     if Config.NoFog then Lighting.FogEnd = 1e6 end
 
-    if Config.DisableParticles then
-        for _, d in ipairs(Workspace:GetDescendants()) do
-            if d:IsA("ParticleEmitter") then d.Enabled = false end
-        end
-    end
-
-    -- ==== Anti-Fling / Anti-Void (uses safe position) ====
+    -- ==== Anti-Fling / Anti-Void ====
     if myRoot and myHum then
         local vel = myRoot.AssemblyLinearVelocity
         local ang = myRoot.AssemblyAngularVelocity
@@ -1963,8 +1905,9 @@ local heartbeat = RunService.Heartbeat:Connect(function()
         end
     end
 
-    -- ==== Hitbox Expander ====
-    if Config.HitboxExpander then
+    -- ==== Hitbox Expander (throttled to 10 Hz) ====
+    if Config.HitboxExpander and now - State.LastHitboxTick > 0.1 then
+        State.LastHitboxTick = now
         for _, p in ipairs(Players:GetPlayers()) do
             if p ~= LP and p.Character and isAlive(p) then
                 local hrp = p.Character:FindFirstChild("HumanoidRootPart")
@@ -2011,7 +1954,6 @@ local heartbeat = RunService.Heartbeat:Connect(function()
                 end
             end
             if Config.ProximityAlert and dist < Config.SafetyRadius then
-                -- light on-screen hint via notification (throttled by proximity)
                 if not State.Alerted or now - State.Alerted > 3 then
                     State.Alerted = now
                     WindUI:Notify({ Title = "⚠ MURDERER NEAR", Content = "Distance: " .. math.floor(dist) .. " studs", Duration = 2 })
@@ -2095,7 +2037,7 @@ local heartbeat = RunService.Heartbeat:Connect(function()
         end
     end
 
-    -- ==== Auto Play (light) ====
+    -- ==== Auto Play ====
     if Config.AutoPlay and myRoot and myHum then
         local role = getRole(LP)
         if role == "Sheriff" then
@@ -2146,7 +2088,7 @@ Players.PlayerAdded:Connect(function(p)
 end)
 
 -- ============================================================
--- INPUT: INFINITE JUMP, TOGGLE, EMERGENCY STOP
+-- INPUT: INFINITE JUMP, EMERGENCY STOP
 -- ============================================================
 table.insert(activeConnections, UserInputService.JumpRequest:Connect(function()
     if Config.InfiniteJump then
@@ -2171,13 +2113,13 @@ end))
 -- ============================================================
 -- ANTI-AFK
 -- ============================================================
-LP.Idled:Connect(function()
+table.insert(activeConnections, LP.Idled:Connect(function()
     if Config.AntiAFK then
         local vu = game:GetService("VirtualUser")
         vu:CaptureController()
         vu:ClickButton2(Vector2.new(0, 0))
     end
-end)
+end))
 
 -- ============================================================
 -- UNLOAD
@@ -2187,6 +2129,7 @@ getgenv().ENI_MM2_Unload = function()
     for _, c in ipairs(activeConnections) do
         pcall(function() c:Disconnect() end)
     end
+    activeConnections = {}
     clearCategory(State.Highlights)
     clearCategory(State.Boxes)
     clearCategory(State.ItemHighlights)
@@ -2202,7 +2145,8 @@ getgenv().ENI_MM2_Unload = function()
         end
     end
     if State.flyBV then pcall(function() State.flyBV:Destroy() end) end
-    if screenGui and screenGui.Parent then screenGui:Destroy() end
+    if espFolder and espFolder.Parent then pcall(function() espFolder:Destroy() end) end
+    pcall(function() WindUI:Destroy() end)
     getgenv().ENI_MM2_Unload = nil
 end
 
@@ -2211,6 +2155,6 @@ end
 -- ============================================================
 WindUI:Notify({
     Title = "ENI's MM2 Hub",
-    Content = "Loaded. Press END for emergency stop.",
+    Content = "Loaded v2.1. Press END for emergency stop.",
     Duration = 4,
 })
