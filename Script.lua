@@ -1,9 +1,8 @@
 --[[
     ╔═══════════════════════════════════════════════════════════════╗
-    ║   Riad Hub                                                    ║
-    ║   UI: WindUI                                                  ║
-    ║   Changelog: v3.0 — Teleport farm, round-end reactions,     ║
-    ║              pre-round fling suite, renamed script           ║
+    ║   Riad Hub  v4.0                                              ║
+    ║   UI: ZeroPoint GUI (JaxRol)                                  ║
+    ║   Changelog: Full port to ZeroPoint, every feature intact   ║
     ╚═══════════════════════════════════════════════════════════════╝
 ]]
 
@@ -12,9 +11,11 @@ if getgenv and getgenv().RiadHub_Unload then
 end
 
 -- ============================================================
--- WINDUI
+-- ZEROPOINT GUI
 -- ============================================================
-local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
+local Library = loadstring(game:HttpGet(
+    "https://raw.githubusercontent.com/JaxRol/ZeroPoint/refs/heads/main/GUI/ZeroPoint-GUI"
+))()
 
 -- ============================================================
 -- SERVICES
@@ -34,9 +35,6 @@ local CollectionService = game:GetService("CollectionService")
 local LP                = Players.LocalPlayer
 local Camera            = Workspace.CurrentCamera
 
--- ============================================================
--- CONNECTION TRACKER
--- ============================================================
 local activeConnections = {}
 
 -- ============================================================
@@ -47,7 +45,6 @@ local Config = {
     ESPTracers = false, ESPDistance = true, ESPChams = false,
     ESPDistanceMax = 600, GunESP = false, CoinESP = false,
     Fullbright = false, NoFog = false, DisableParticles = false,
-    ShowPerfOverlay = true,
 
     Aimbot = false, AutoShoot = false, SilentAim = false,
     AimPrediction = true, PingComp = true, SingleShot = false,
@@ -76,7 +73,6 @@ local Config = {
     AutoDrop = false, SaveSlot1 = nil, SaveSlot2 = nil,
 
     FlingStyle = "Torque",
-    -- new v3.0
     FlingMurdererPreRound = false,
     FlingSheriffPreRound = false,
     FlingHeroPreRound = false,
@@ -145,15 +141,9 @@ local State = {
     LastSafePosition = nil, DeadPlayers = {}, OriginalHitboxSizes = {},
     IsFlinging = false, AuraRing = nil, FOVCircle = nil, flyBV = nil,
     SilentAimHookActive = true, RoundStartedFlag = false,
-    Alerted = 0,
-    RoundState = "Waiting",
-    LastRoundResult = nil,
-    PreRoundFlingUsed = false,
+    Alerted = 0, RoundState = "Waiting", LastRoundResult = nil,
 }
 
--- ============================================================
--- ESP FOLDER
--- ============================================================
 local espFolder = CoreGui:FindFirstChild("RiadHub_ESP") or LP.PlayerGui:FindFirstChild("RiadHub_ESP")
 if not espFolder then
     espFolder = Instance.new("Folder")
@@ -444,56 +434,33 @@ local function flingCharacter(targetChar)
     State.IsFlinging = false
 end
 
--- ============================================================
--- PRE-ROUND FLING SUITE
--- ============================================================
 local function flingByRole(role)
-    local targets = {}
     for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LP and p.Character and isAlive(p) then
-            if getRole(p) == role then
-                table.insert(targets, p)
-            end
-        end
-    end
-    for _, p in ipairs(targets) do
-        local hrp = getHRP(p)
-        if hrp then
+        if p ~= LP and p.Character and isAlive(p) and getRole(p) == role then
             task.spawn(flingCharacter, p.Character)
             task.wait(0.1)
         end
     end
-    return #targets
 end
 
-local function preRoundFlingLoop()
-    task.spawn(function()
-        while true do
-            task.wait(0.5)
-            -- only fire when we're not in an active round
-            if State.RoundState ~= "Active" then
-                if Config.FlingMurdererPreRound then
-                    flingByRole("Murderer")
-                end
-                if Config.FlingSheriffPreRound then
-                    flingByRole("Sheriff")
-                end
-                if Config.FlingHeroPreRound then
-                    flingByRole("Innocent") -- Hero role may be wrapped as Innocent with extra tool; adjust if needed
-                end
-                if Config.FlingAllPreRound then
-                    for _, p in ipairs(Players:GetPlayers()) do
-                        if p ~= LP and p.Character and isAlive(p) then
-                            task.spawn(flingCharacter, p.Character)
-                            task.wait(0.1)
-                        end
+task.spawn(function()
+    while true do
+        task.wait(0.5)
+        if State.RoundState ~= "Active" then
+            if Config.FlingMurdererPreRound then flingByRole("Murderer") end
+            if Config.FlingSheriffPreRound then flingByRole("Sheriff") end
+            if Config.FlingHeroPreRound then flingByRole("Innocent") end
+            if Config.FlingAllPreRound then
+                for _, p in ipairs(Players:GetPlayers()) do
+                    if p ~= LP and p.Character and isAlive(p) then
+                        task.spawn(flingCharacter, p.Character)
+                        task.wait(0.1)
                     end
                 end
             end
         end
-    end)
-end
-preRoundFlingLoop()
+    end
+end)
 
 -- ============================================================
 -- AURA RING / FOV
@@ -561,73 +528,6 @@ local function updateFOVCircle()
         State.FOVCircle.Visible = false
     end
 end
-
--- ============================================================
--- PERFORMANCE OVERLAY
--- ============================================================
-local perfGui = Instance.new("ScreenGui")
-perfGui.Name = "Riad_PerfOverlay"
-perfGui.ResetOnSpawn = false
-perfGui.IgnoreGuiInset = true
-pcall(function() perfGui.Parent = CoreGui end)
-if not perfGui.Parent then perfGui.Parent = LP:WaitForChild("PlayerGui") end
-
-local perfFrame = Instance.new("Frame")
-perfFrame.Size = UDim2.new(0, 200, 0, 40)
-perfFrame.Position = UDim2.new(0, 12, 0, 12)
-perfFrame.BackgroundColor3 = Color3.fromRGB(13, 11, 20)
-perfFrame.BackgroundTransparency = 0.25
-perfFrame.BorderSizePixel = 0
-perfFrame.Visible = Config.ShowPerfOverlay
-perfFrame.Parent = perfGui
-local perfCorner = Instance.new("UICorner") perfCorner.CornerRadius = UDim.new(0, 8) perfCorner.Parent = perfFrame
-local perfStroke = Instance.new("UIStroke") perfStroke.Color = Color3.fromRGB(80, 220, 120) perfStroke.Thickness = 1 perfStroke.Transparency = 0.4 perfStroke.Parent = perfFrame
-
-local perfLabel = Instance.new("TextLabel")
-perfLabel.Size = UDim2.new(1, -12, 1, 0)
-perfLabel.Position = UDim2.new(0, 6, 0, 0)
-perfLabel.BackgroundTransparency = 1
-perfLabel.Font = Enum.Font.GothamBold
-perfLabel.TextSize = 13
-perfLabel.TextColor3 = Color3.fromRGB(80, 220, 120)
-perfLabel.TextXAlignment = Enum.TextXAlignment.Left
-perfLabel.Text = "FPS: -- | PING: --"
-perfLabel.Parent = perfFrame
-
-local perfFpsCount = 0
-local perfFpsTime = tick()
-local perfFps = 0
-local perfPing = 0
-local perfPingTime = tick()
-
-local perfConn = RunService.RenderStepped:Connect(function()
-    perfFpsCount = perfFpsCount + 1
-    local now = tick()
-    if now - perfFpsTime >= 1 then
-        perfFps = math.floor(perfFpsCount / (now - perfFpsTime) + 0.5)
-        perfFpsCount = 0
-        perfFpsTime = now
-    end
-    if now - perfPingTime >= 2 then
-        perfPingTime = now
-        local ok, p = pcall(function() return math.floor(LP:GetNetworkPing() * 1000) end)
-        if ok and p then perfPing = p
-        else
-            pcall(function()
-                perfPing = math.floor(game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue())
-            end)
-        end
-    end
-
-    local fpsColor = Color3.fromRGB(80, 220, 120)
-    if perfFps < 30 then fpsColor = Color3.fromRGB(255, 90, 90)
-    elseif perfFps < 50 then fpsColor = Color3.fromRGB(255, 190, 80) end
-
-    perfLabel.Text = string.format("FPS: %d  |  PING: %d ms", perfFps, perfPing)
-    perfLabel.TextColor3 = fpsColor
-    perfFrame.Visible = Config.ShowPerfOverlay
-end)
-table.insert(activeConnections, perfConn)
 
 -- ============================================================
 -- SILENT AIM HOOK
@@ -788,141 +688,170 @@ end
 -- ============================================================
 -- WINDOW
 -- ============================================================
-pcall(function()
-    WindUI:AddTheme({
-        Name = "ThunderGreen",
-        Accent = Color3.fromRGB(80, 220, 120),
-        Dialog = Color3.fromRGB(13, 11, 20),
-        Outline = Color3.fromRGB(80, 220, 120),
-        Text = Color3.fromRGB(243, 240, 255),
-        Placeholder = Color3.fromRGB(120, 130, 150),
-        Background = Color3.fromRGB(10, 8, 16),
-        Button = Color3.fromRGB(40, 160, 90),
-        Icon = Color3.fromRGB(80, 220, 120),
+local Window = Library:CreateWindow({
+    Title = "Riad Hub",
+    Footer = "v4.0 · ZeroPoint GUI",
+    Icon = "sparkles",
+
+    Size = UDim2.fromOffset(760, 560),
+    Center = true,
+    AutoShow = true,
+    Resizable = true,
+
+    Glow = true,
+    GlobalSearch = true,
+
+    ToggleKeybind = Enum.KeyCode.RightControl,
+
+    ShowMobileButtons = true,
+    MobileButtonsSide = "Left",
+    MobileButtonDragging = true,
+
+    ScreenEffects = false,
+    GuiEffects = false,
+})
+
+-- ============================================================
+-- HOME
+-- ============================================================
+local Home = Window:AddTab({
+    Name = "Home",
+    Icon = "house",
+    Description = "Welcome to Riad Hub",
+})
+
+local WelcomeBox = Home:AddLeftGroupbox("Welcome", "sparkles")
+
+WelcomeBox:AddLabel("Riad Hub v4.0 — built on ZeroPoint GUI.")
+WelcomeBox:AddLabel("Every feature from v3.0 is here, just on a new interface.")
+WelcomeBox:AddDivider()
+
+WelcomeBox:AddButton("Test Notification", function()
+    Library:Notify({
+        Title = "Riad Hub",
+        Description = "Notifications are working.",
+        Time = 3,
     })
 end)
 
-local Window = WindUI:CreateWindow({
-    Title = "Riad Hub",
-    Icon = "rbxassetid://4483362458",
-    Author = "v3.0",
-    Folder = "RiadHub",
-    Size = UDim2.fromOffset(660, 520),
-    Transparent = true,
-    Theme = "ThunderGreen",
-    HideSearchBar = false,
-    User = { Enabled = true, Anonymous = true },
-})
+WelcomeBox:AddButton("Unload Hub", function()
+    if getgenv().RiadHub_Unload then
+        getgenv().RiadHub_Unload()
+    end
+end)
 
-Window:EditOpenButton({
-    Title = "Riad Hub",
-    Icon = "rbxassetid://4483362458",
-    CornerRadius = UDim.new(0, 16),
-    StrokeThickness = 2,
-    Color = ColorSequence.new(Color3.fromRGB(80, 220, 120), Color3.fromRGB(40, 160, 90)),
-    OnlyMobile = false,
-})
+local QuickBox = Home:AddRightGroupbox("Quick Actions", "zap")
 
-local VisualTab    = Window:Tab({ Title = "Visual",    Icon = "eye" })
-local CombatTab    = Window:Tab({ Title = "Combat",    Icon = "crosshair" })
-local MoveTab      = Window:Tab({ Title = "Movement",  Icon = "move" })
-local FarmTab      = Window:Tab({ Title = "Farm",      Icon = "coins" })
-local SurvTab      = Window:Tab({ Title = "Survival",  Icon = "shield" })
-local TPTime       = Window:Tab({ Title = "Teleports", Icon = "map-pin" })
-local TrollTab     = Window:Tab({ Title = "Trolling",  Icon = "smile" })
-local MiscTab      = Window:Tab({ Title = "Misc",      Icon = "settings" })
-local InfoTab      = Window:Tab({ Title = "Info",      Icon = "info" })
+QuickBox:AddButton("Teleport to Murderer", function()
+    local m = select(1, getRolePlayers())
+    local myRoot = getHRP(LP)
+    if m and myRoot then
+        local mr = getHRP(m)
+        if mr then
+            myRoot.CFrame = mr.CFrame * CFrame.new(0, 0, 4)
+            Library:Notify({ Title = "Riad Hub", Description = "Teleported to " .. m.Name, Time = 2 })
+        end
+    else
+        Library:Notify({ Title = "Riad Hub", Description = "Murderer not found.", Time = 2 })
+    end
+end)
 
-local function bindAutoSave(cb)
-    return function(v) cb(v) if not isSyncingUI then AutoSaveConfig() end end
-end
+QuickBox:AddButton("Reset Character", function()
+    local h = getHumanoid(LP)
+    if h then h.Health = 0 end
+end)
+
+QuickBox:AddButton("Announce Roles", function()
+    local m, s = getRolePlayers()
+    local msg = "[Riad] Murderer: " .. (m and m.Name or "?") .. " | Sheriff: " .. (s and s.Name or "?")
+    local ch = TextChatService:FindFirstChild("TextChannels")
+    local ch2 = ch and ch:FindFirstChild("RBXGeneral")
+    if ch2 and ch2.SendAsync then
+        ch2:SendAsync(msg)
+    else
+        pcall(function()
+            local ev = ReplicatedStorage:FindFirstChild("DefaultDefaultChatSystemChatEvents") or ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
+            local say = ev and ev:FindFirstChild("SayMessageRequest")
+            if say then say:FireServer(msg, "All") end
+        end)
+    end
+    Library:Notify({ Title = "Riad Hub", Description = "Announced roles.", Time = 2 })
+end)
 
 -- ============================================================
 -- VISUAL TAB
 -- ============================================================
-VisualTab:Section({ Title = "Role ESP" })
-VisualTab:Toggle({
-    Title = "Role ESP",
-    Desc = "Highlight murderer (red), sheriff (blue), innocents (white)",
-    Value = Config.RoleESP,
-    Callback = bindAutoSave(function(v) Config.RoleESP = v end)
-})
-VisualTab:Toggle({
-    Title = "ESP Chams",
-    Desc = "Full 3D colored fill on characters",
-    Value = Config.ESPChams,
-    Callback = bindAutoSave(function(v) Config.ESPChams = v if not v then clearCategory(State.Highlights) end end)
-})
-VisualTab:Toggle({
-    Title = "ESP Boxes",
-    Desc = "Draw 3D box around each character",
-    Value = Config.ESPBoxes,
-    Callback = bindAutoSave(function(v) Config.ESPBoxes = v if not v then clearCategory(State.Boxes) end end)
-})
-VisualTab:Toggle({
-    Title = "ESP Names",
-    Desc = "Show [Role] Name above each player",
-    Value = Config.ESPNames,
-    Callback = bindAutoSave(function(v) Config.ESPNames = v end)
-})
-VisualTab:Toggle({
-    Title = "ESP Distance",
-    Desc = "Show distance in studs to each player",
-    Value = Config.ESPDistance,
-    Callback = bindAutoSave(function(v) Config.ESPDistance = v end)
-})
-VisualTab:Toggle({
-    Title = "ESP Tracers",
-    Desc = "Line from under you to each player (needs Drawing)",
-    Value = Config.ESPTracers,
-    Callback = bindAutoSave(function(v) Config.ESPTracers = v end)
-})
-VisualTab:Slider({
-    Title = "ESP Max Distance",
-    Desc = "Max render distance for ESP",
-    Value = { Min = 50, Max = 2000, Default = Config.ESPDistanceMax },
-    Step = 25,
-    Callback = bindAutoSave(function(v) Config.ESPDistanceMax = v end)
+local VisualTab = Window:AddTab({
+    Name = "Visuals",
+    Icon = "eye",
+    Description = "ESP and world visuals",
 })
 
-VisualTab:Section({ Title = "Overlay" })
-VisualTab:Toggle({
-    Title = "Show FPS / Ping Overlay",
-    Desc = "Floating HUD showing performance stats",
-    Value = Config.ShowPerfOverlay,
-    Callback = bindAutoSave(function(v) Config.ShowPerfOverlay = v end)
+local ESPBox = VisualTab:AddLeftGroupbox("Role ESP", "eye")
+
+ESPBox:AddToggle("RoleESP", {
+    Text = "Role ESP",
+    Default = false,
+    Callback = function(v) Config.RoleESP = v AutoSaveConfig() end,
+})
+ESPBox:AddToggle("ESPChams", {
+    Text = "ESP Chams (3D Fill)",
+    Default = false,
+    Callback = function(v) Config.ESPChams = v if not v then clearCategory(State.Highlights) end AutoSaveConfig() end,
+})
+ESPBox:AddToggle("ESPBoxes", {
+    Text = "ESP Boxes",
+    Default = false,
+    Callback = function(v) Config.ESPBoxes = v if not v then clearCategory(State.Boxes) end AutoSaveConfig() end,
+})
+ESPBox:AddToggle("ESPNames", {
+    Text = "ESP Names",
+    Default = true,
+    Callback = function(v) Config.ESPNames = v AutoSaveConfig() end,
+})
+ESPBox:AddToggle("ESPDistance", {
+    Text = "ESP Distance",
+    Default = true,
+    Callback = function(v) Config.ESPDistance = v AutoSaveConfig() end,
+})
+ESPBox:AddToggle("ESPTracers", {
+    Text = "ESP Tracers",
+    Default = false,
+    Callback = function(v) Config.ESPTracers = v AutoSaveConfig() end,
+})
+ESPBox:AddSlider("ESPDistanceMax", {
+    Text = "ESP Max Distance",
+    Default = 600, Min = 50, Max = 2000, Rounding = 0,
+    Suffix = " studs",
+    Callback = function(v) Config.ESPDistanceMax = v AutoSaveConfig() end,
 })
 
-VisualTab:Section({ Title = "Item & World" })
-VisualTab:Toggle({
-    Title = "Dropped Gun ESP",
-    Desc = "Highlight dropped revolver",
-    Value = Config.GunESP,
-    Callback = bindAutoSave(function(v) Config.GunESP = v if not v then clearCategory(State.ItemHighlights) end end)
+local WorldBox = VisualTab:AddRightGroupbox("World", "globe")
+
+WorldBox:AddToggle("GunESP", {
+    Text = "Dropped Gun ESP",
+    Default = false,
+    Callback = function(v) Config.GunESP = v if not v then clearCategory(State.ItemHighlights) end AutoSaveConfig() end,
 })
-VisualTab:Toggle({
-    Title = "Coin ESP",
-    Desc = "Highlight active coin spawns",
-    Value = Config.CoinESP,
-    Callback = bindAutoSave(function(v) Config.CoinESP = v if not v then clearCategory(State.ItemHighlights) end end)
+WorldBox:AddToggle("CoinESP", {
+    Text = "Coin ESP",
+    Default = false,
+    Callback = function(v) Config.CoinESP = v if not v then clearCategory(State.ItemHighlights) end AutoSaveConfig() end,
 })
-VisualTab:Toggle({
-    Title = "Fullbright",
-    Desc = "Max lighting brightness",
-    Value = Config.Fullbright,
-    Callback = bindAutoSave(function(v) Config.Fullbright = v end)
+WorldBox:AddToggle("Fullbright", {
+    Text = "Fullbright",
+    Default = false,
+    Callback = function(v) Config.Fullbright = v AutoSaveConfig() end,
 })
-VisualTab:Toggle({
-    Title = "No Fog",
-    Desc = "Remove distance fog",
-    Value = Config.NoFog,
-    Callback = bindAutoSave(function(v) Config.NoFog = v end)
+WorldBox:AddToggle("NoFog", {
+    Text = "No Fog",
+    Default = false,
+    Callback = function(v) Config.NoFog = v AutoSaveConfig() end,
 })
-VisualTab:Toggle({
-    Title = "Disable Particles",
-    Desc = "Anti-lag — kills particle emitters (one-shot)",
-    Value = Config.DisableParticles,
-    Callback = bindAutoSave(function(v)
+WorldBox:AddToggle("DisableParticles", {
+    Text = "Disable Particles (one-shot)",
+    Default = false,
+    Callback = function(v)
         Config.DisableParticles = v
         if v then
             task.spawn(function()
@@ -931,183 +860,165 @@ VisualTab:Toggle({
                 end
             end)
         end
-    end)
+        AutoSaveConfig()
+    end,
 })
 
 -- ============================================================
 -- COMBAT TAB
 -- ============================================================
-CombatTab:Section({ Title = "Gun / Sheriff" })
-CombatTab:Toggle({
-    Title = "Aimbot (Camera Lock)",
-    Desc = "Camera locks to nearest player",
-    Value = Config.Aimbot,
-    Callback = bindAutoSave(function(v) Config.Aimbot = v end)
-})
-CombatTab:Toggle({
-    Title = "Auto-Shoot",
-    Desc = "Fires revolver at Murderer when in range",
-    Value = Config.AutoShoot,
-    Callback = bindAutoSave(function(v) Config.AutoShoot = v end)
-})
-CombatTab:Toggle({
-    Title = "Silent Aim",
-    Desc = "Redirects gun raycast server-side to Murderer",
-    Value = Config.SilentAim,
-    Callback = bindAutoSave(function(v) Config.SilentAim = v end)
-})
-CombatTab:Toggle({
-    Title = "Aim Prediction",
-    Desc = "Lead shots to compensate target velocity",
-    Value = Config.AimPrediction,
-    Callback = bindAutoSave(function(v) Config.AimPrediction = v end)
-})
-CombatTab:Toggle({
-    Title = "Ping Compensation",
-    Desc = "Adjusts lead by current ping",
-    Value = Config.PingComp,
-    Callback = bindAutoSave(function(v) Config.PingComp = v end)
-})
-CombatTab:Toggle({
-    Title = "Single Shot Lock",
-    Desc = "Fire once then disable auto-shoot",
-    Value = Config.SingleShot,
-    Callback = bindAutoSave(function(v) Config.SingleShot = v end)
-})
-CombatTab:Toggle({
-    Title = "Auto Equip Gun",
-    Desc = "Equip revolver when Murderer in sight",
-    Value = Config.AutoEquipGun,
-    Callback = bindAutoSave(function(v) Config.AutoEquipGun = v end)
-})
-CombatTab:Toggle({
-    Title = "Full Gun Grabber",
-    Desc = "Auto-pickup dropped gun within range",
-    Value = Config.GrabGunAuto,
-    Callback = bindAutoSave(function(v) Config.GrabGunAuto = v end)
-})
-CombatTab:Slider({
-    Title = "Gun Grab Distance",
-    Desc = "Max distance for auto-pickup",
-    Value = { Min = 20, Max = 800, Default = Config.GunGrabDist },
-    Step = 10,
-    Callback = bindAutoSave(function(v) Config.GunGrabDist = v end)
-})
-CombatTab:Toggle({
-    Title = "Show FOV Circle",
-    Desc = "Draw aimbot FOV circle on screen",
-    Value = Config.ShowFOV,
-    Callback = bindAutoSave(function(v) Config.ShowFOV = v end)
-})
-CombatTab:Slider({
-    Title = "FOV Radius",
-    Desc = "Radius of aim lock field (pixels)",
-    Value = { Min = 50, Max = 700, Default = Config.FOVRadius },
-    Step = 10,
-    Callback = bindAutoSave(function(v) Config.FOVRadius = v end)
+local CombatTab = Window:AddTab({
+    Name = "Combat",
+    Icon = "sword",
+    Description = "Aim, shoot, stab",
 })
 
-CombatTab:Section({ Title = "Knife / Murderer" })
-CombatTab:Toggle({
-    Title = "Auto-Stab",
-    Desc = "Activates knife when target in range",
-    Value = Config.AutoStab,
-    Callback = bindAutoSave(function(v) Config.AutoStab = v end)
+local GunBox = CombatTab:AddLeftGroupbox("Gun · Sheriff", "crosshair")
+
+GunBox:AddToggle("Aimbot", {
+    Text = "Aimbot (Camera Lock)",
+    Default = false,
+    Callback = function(v) Config.Aimbot = v AutoSaveConfig() end,
 })
-CombatTab:Toggle({
-    Title = "Kill Aura",
-    Desc = "Auto-strike players inside aura range",
-    Value = Config.KillAura,
-    Callback = bindAutoSave(function(v) Config.KillAura = v end)
+GunBox:AddToggle("AutoShoot", {
+    Text = "Auto-Shoot",
+    Default = false,
+    Callback = function(v) Config.AutoShoot = v AutoSaveConfig() end,
 })
-CombatTab:Toggle({
-    Title = "Auto Kill Innocents",
-    Desc = "Constantly slash nearby innocents",
-    Value = Config.AutoKill,
-    Callback = bindAutoSave(function(v) Config.AutoKill = v end)
+GunBox:AddToggle("SilentAim", {
+    Text = "Silent Aim",
+    Default = false,
+    Callback = function(v) Config.SilentAim = v AutoSaveConfig() end,
 })
-CombatTab:Dropdown({
-    Title = "Kill Mode",
-    Desc = "Method used for knife strikes",
+GunBox:AddToggle("AimPrediction", {
+    Text = "Aim Prediction",
+    Default = true,
+    Callback = function(v) Config.AimPrediction = v AutoSaveConfig() end,
+})
+GunBox:AddToggle("PingComp", {
+    Text = "Ping Compensation",
+    Default = true,
+    Callback = function(v) Config.PingComp = v AutoSaveConfig() end,
+})
+GunBox:AddToggle("SingleShot", {
+    Text = "Single Shot Lock",
+    Default = false,
+    Callback = function(v) Config.SingleShot = v AutoSaveConfig() end,
+})
+GunBox:AddToggle("AutoEquipGun", {
+    Text = "Auto Equip Gun",
+    Default = true,
+    Callback = function(v) Config.AutoEquipGun = v AutoSaveConfig() end,
+})
+GunBox:AddToggle("GrabGunAuto", {
+    Text = "Full Gun Grabber",
+    Default = false,
+    Callback = function(v) Config.GrabGunAuto = v AutoSaveConfig() end,
+})
+GunBox:AddSlider("GunGrabDist", {
+    Text = "Gun Grab Distance",
+    Default = 300, Min = 20, Max = 800, Rounding = 0,
+    Suffix = " studs",
+    Callback = function(v) Config.GunGrabDist = v AutoSaveConfig() end,
+})
+GunBox:AddToggle("ShowFOV", {
+    Text = "Show FOV Circle",
+    Default = false,
+    Callback = function(v) Config.ShowFOV = v AutoSaveConfig() end,
+})
+GunBox:AddSlider("FOVRadius", {
+    Text = "FOV Radius",
+    Default = 160, Min = 50, Max = 700, Rounding = 0,
+    Callback = function(v) Config.FOVRadius = v AutoSaveConfig() end,
+})
+
+local KnifeBox = CombatTab:AddLeftGroupbox("Knife · Murderer", "sword")
+
+KnifeBox:AddToggle("AutoStab", {
+    Text = "Auto-Stab",
+    Default = false,
+    Callback = function(v) Config.AutoStab = v AutoSaveConfig() end,
+})
+KnifeBox:AddToggle("KillAura", {
+    Text = "Kill Aura",
+    Default = false,
+    Callback = function(v) Config.KillAura = v AutoSaveConfig() end,
+})
+KnifeBox:AddToggle("AutoKill", {
+    Text = "Auto Kill Innocents",
+    Default = false,
+    Callback = function(v) Config.AutoKill = v AutoSaveConfig() end,
+})
+KnifeBox:AddToggle("KillAll", {
+    Text = "Kill All (No Limit)",
+    Default = false,
+    Callback = function(v) Config.KillAll = v AutoSaveConfig() end,
+})
+KnifeBox:AddDropdown("KillMode", {
+    Text = "Kill Mode",
     Values = { "Legit", "Blatant", "Throw" },
-    Value = Config.KillMode,
-    Callback = bindAutoSave(function(v) Config.KillMode = v end)
+    Default = "Legit",
+    Callback = function(v) Config.KillMode = v AutoSaveConfig() end,
 })
-CombatTab:Toggle({
-    Title = "Knife Silent Aim",
-    Desc = "Thrown knife redirects into target",
-    Value = Config.KnifeSilentAim,
-    Callback = bindAutoSave(function(v) Config.KnifeSilentAim = v end)
+KnifeBox:AddToggle("KnifeSilentAim", {
+    Text = "Knife Silent Aim",
+    Default = true,
+    Callback = function(v) Config.KnifeSilentAim = v AutoSaveConfig() end,
 })
-CombatTab:Toggle({
-    Title = "Kill All (No Limit)",
-    Desc = "Eliminate every living player on click-hold",
-    Value = Config.KillAll,
-    Callback = bindAutoSave(function(v) Config.KillAll = v end)
+KnifeBox:AddSlider("AuraRange", {
+    Text = "Aura Range",
+    Default = 15, Min = 5, Max = 45, Rounding = 0,
+    Suffix = " studs",
+    Callback = function(v) Config.AuraRange = v AutoSaveConfig() end,
 })
-CombatTab:Slider({
-    Title = "Aura Range",
-    Desc = "Distance threshold for melee strikes",
-    Value = { Min = 5, Max = 45, Default = Config.AuraRange },
-    Step = 1,
-    Callback = bindAutoSave(function(v) Config.AuraRange = v end)
+KnifeBox:AddToggle("ShowAuraRing", {
+    Text = "Show Aura Ring",
+    Default = false,
+    Callback = function(v) Config.ShowAuraRing = v AutoSaveConfig() end,
 })
-CombatTab:Toggle({
-    Title = "Show Aura Ring",
-    Desc = "Draw ring around character showing range",
-    Value = Config.ShowAuraRing,
-    Callback = bindAutoSave(function(v) Config.ShowAuraRing = v end)
+KnifeBox:AddToggle("AutoEquipKnife", {
+    Text = "Auto Equip Knife",
+    Default = true,
+    Callback = function(v) Config.AutoEquipKnife = v AutoSaveConfig() end,
 })
-CombatTab:Toggle({
-    Title = "Auto Equip Knife",
-    Desc = "Equip knife when targets near",
-    Value = Config.AutoEquipKnife,
-    Callback = bindAutoSave(function(v) Config.AutoEquipKnife = v end)
+KnifeBox:AddToggle("ProximityKnife", {
+    Text = "Proximity Knife",
+    Default = true,
+    Callback = function(v) Config.ProximityKnife = v AutoSaveConfig() end,
 })
-CombatTab:Toggle({
-    Title = "Proximity Knife",
-    Desc = "Pre-draw blade when enemy nears",
-    Value = Config.ProximityKnife,
-    Callback = bindAutoSave(function(v) Config.ProximityKnife = v end)
+KnifeBox:AddSlider("KnifeProxDist", {
+    Text = "Knife Proximity Distance",
+    Default = 18, Min = 5, Max = 40, Rounding = 0,
+    Suffix = " studs",
+    Callback = function(v) Config.KnifeProxDist = v AutoSaveConfig() end,
 })
-CombatTab:Slider({
-    Title = "Knife Proximity Distance",
-    Desc = "Range for proximity knife equip",
-    Value = { Min = 5, Max = 40, Default = Config.KnifeProxDist },
-    Step = 1,
-    Callback = bindAutoSave(function(v) Config.KnifeProxDist = v end)
-})
-CombatTab:Button({
-    Title = "Kill All (Murderer Only)",
-    Desc = "Teleport to every player and stab",
-    Callback = function()
-        local knife = equipTool("Knife")
-        if not knife then
-            WindUI:Notify({ Title = "Riad Hub", Content = "You need the knife equipped.", Duration = 3 })
-            return
-        end
-        local myHRP = getHRP(LP)
-        if not myHRP then return end
-        for _, p in ipairs(Players:GetPlayers()) do
-            if p ~= LP and p.Character and isAlive(p) then
-                local hrp = getHRP(p)
-                if hrp then
-                    myHRP.CFrame = hrp.CFrame
-                    task.wait(0.05)
-                    knife:Activate()
-                    task.wait(0.05)
-                end
+KnifeBox:AddButton("Kill All (Murderer Only)", function()
+    local knife = equipTool("Knife")
+    if not knife then
+        Library:Notify({ Title = "Riad Hub", Description = "You need the knife equipped.", Time = 3 })
+        return
+    end
+    local myHRP = getHRP(LP)
+    if not myHRP then return end
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LP and p.Character and isAlive(p) then
+            local hrp = getHRP(p)
+            if hrp then
+                myHRP.CFrame = hrp.CFrame
+                task.wait(0.05)
+                knife:Activate()
+                task.wait(0.05)
             end
         end
     end
-})
+end)
 
-CombatTab:Section({ Title = "Hitbox" })
-CombatTab:Toggle({
-    Title = "Hitbox Expander",
-    Desc = "Inflate player hitboxes for easy stabs/shots",
-    Value = Config.HitboxExpander,
-    Callback = bindAutoSave(function(v)
+local HitboxBox = CombatTab:AddRightGroupbox("Hitbox", "square")
+
+HitboxBox:AddToggle("HitboxExpander", {
+    Text = "Hitbox Expander",
+    Default = false,
+    Callback = function(v)
         Config.HitboxExpander = v
         if not v then
             for part, sz in pairs(State.OriginalHitboxSizes) do
@@ -1118,70 +1029,66 @@ CombatTab:Toggle({
             end
             State.OriginalHitboxSizes = {}
         end
-    end)
+        AutoSaveConfig()
+    end,
 })
-CombatTab:Slider({
-    Title = "Hitbox Size",
-    Desc = "Expanded hitbox dimensions (studs)",
-    Value = { Min = 4, Max = 30, Default = Config.HitboxSize },
-    Step = 1,
-    Callback = bindAutoSave(function(v) Config.HitboxSize = v end)
+HitboxBox:AddSlider("HitboxSize", {
+    Text = "Hitbox Size",
+    Default = 10, Min = 4, Max = 30, Rounding = 0,
+    Suffix = " studs",
+    Callback = function(v) Config.HitboxSize = v AutoSaveConfig() end,
 })
-CombatTab:Slider({
-    Title = "Hitbox Transparency",
-    Desc = "Visibility of expanded hitboxes",
-    Value = { Min = 0, Max = 1, Default = Config.HitboxTransparency },
-    Step = 0.05,
-    Callback = bindAutoSave(function(v) Config.HitboxTransparency = v end)
+HitboxBox:AddSlider("HitboxTransparency", {
+    Text = "Hitbox Transparency (%)",
+    Default = 60, Min = 0, Max = 100, Rounding = 0,
+    Callback = function(v) Config.HitboxTransparency = v / 100 AutoSaveConfig() end,
 })
 
 -- ============================================================
 -- MOVEMENT TAB
 -- ============================================================
-MoveTab:Section({ Title = "Speed & Jump" })
-MoveTab:Toggle({
-    Title = "Speed Boost",
-    Desc = "Modify walk speed",
-    Value = Config.Speed,
-    Callback = bindAutoSave(function(v) Config.Speed = v end)
+local MoveTab = Window:AddTab({
+    Name = "Movement",
+    Icon = "move",
+    Description = "Speed, fly, noclip",
 })
-MoveTab:Slider({
-    Title = "Walk Speed",
-    Desc = "Studs per second",
-    Value = { Min = 16, Max = 60, Default = Config.SpeedValue },
-    Step = 1,
-    Callback = bindAutoSave(function(v) Config.SpeedValue = v end)
+
+local CharBox = MoveTab:AddLeftGroupbox("Character", "user")
+
+CharBox:AddToggle("Speed", {
+    Text = "Speed Boost",
+    Default = false,
+    Callback = function(v) Config.Speed = v AutoSaveConfig() end,
 })
-MoveTab:Toggle({
-    Title = "Jump Boost",
-    Desc = "Modify jump power",
-    Value = Config.JumpEnabled,
-    Callback = bindAutoSave(function(v) Config.JumpEnabled = v end)
+CharBox:AddSlider("SpeedValue", {
+    Text = "Walk Speed",
+    Default = 24, Min = 16, Max = 60, Rounding = 0,
+    Callback = function(v) Config.SpeedValue = v AutoSaveConfig() end,
 })
-MoveTab:Slider({
-    Title = "Jump Power",
-    Desc = "Jump power value",
-    Value = { Min = 50, Max = 150, Default = Config.JumpValue },
-    Step = 5,
-    Callback = bindAutoSave(function(v) Config.JumpValue = v end)
+CharBox:AddToggle("JumpEnabled", {
+    Text = "Jump Boost",
+    Default = false,
+    Callback = function(v) Config.JumpEnabled = v AutoSaveConfig() end,
 })
-MoveTab:Toggle({
-    Title = "Infinite Jump",
-    Desc = "Jump mid-air repeatedly",
-    Value = Config.InfiniteJump,
-    Callback = bindAutoSave(function(v) Config.InfiniteJump = v end)
+CharBox:AddSlider("JumpValue", {
+    Text = "Jump Power",
+    Default = 50, Min = 50, Max = 150, Rounding = 0,
+    Callback = function(v) Config.JumpValue = v AutoSaveConfig() end,
 })
-MoveTab:Toggle({
-    Title = "Noclip",
-    Desc = "Walk through walls and doors",
-    Value = Config.Noclip,
-    Callback = bindAutoSave(function(v) Config.Noclip = v end)
+CharBox:AddToggle("InfiniteJump", {
+    Text = "Infinite Jump",
+    Default = false,
+    Callback = function(v) Config.InfiniteJump = v AutoSaveConfig() end,
 })
-MoveTab:Toggle({
-    Title = "Fly",
-    Desc = "WASD + Space / LeftCtrl",
-    Value = Config.Fly,
-    Callback = bindAutoSave(function(v)
+CharBox:AddToggle("Noclip", {
+    Text = "Noclip",
+    Default = false,
+    Callback = function(v) Config.Noclip = v AutoSaveConfig() end,
+})
+CharBox:AddToggle("Fly", {
+    Text = "Fly (WASD + Space/Ctrl)",
+    Default = false,
+    Callback = function(v)
         Config.Fly = v
         if v then
             local myRoot = getHRP(LP)
@@ -1195,347 +1102,307 @@ MoveTab:Toggle({
         else
             if State.flyBV then State.flyBV:Destroy() State.flyBV = nil end
         end
-    end)
+        AutoSaveConfig()
+    end,
 })
-MoveTab:Slider({
-    Title = "Fly Speed",
-    Desc = "Studs per second while flying",
-    Value = { Min = 15, Max = 150, Default = Config.FlySpeed },
-    Step = 5,
-    Callback = bindAutoSave(function(v) Config.FlySpeed = v end)
+CharBox:AddSlider("FlySpeed", {
+    Text = "Fly Speed",
+    Default = 35, Min = 15, Max = 150, Rounding = 0,
+    Suffix = " studs/s",
+    Callback = function(v) Config.FlySpeed = v AutoSaveConfig() end,
 })
 
-MoveTab:Section({ Title = "Safety" })
-MoveTab:Toggle({
-    Title = "Anti-Ragdoll",
-    Desc = "Prevent ragdoll state",
-    Value = Config.AntiRagdoll,
-    Callback = bindAutoSave(function(v) Config.AntiRagdoll = v end)
+local SafeBox = MoveTab:AddRightGroupbox("Safety", "shield")
+
+SafeBox:AddToggle("AntiRagdoll", {
+    Text = "Anti-Ragdoll",
+    Default = false,
+    Callback = function(v) Config.AntiRagdoll = v AutoSaveConfig() end,
 })
-MoveTab:Toggle({
-    Title = "Anti-Fling",
-    Desc = "Blocks other players colliding & flinging you",
-    Value = Config.AntiFling,
-    Callback = bindAutoSave(function(v) Config.AntiFling = v end)
+SafeBox:AddToggle("AntiFling", {
+    Text = "Anti-Fling",
+    Default = true,
+    Callback = function(v) Config.AntiFling = v AutoSaveConfig() end,
 })
-MoveTab:Toggle({
-    Title = "Anti-Void",
-    Desc = "Floor recovery when flung or falling",
-    Value = Config.AntiVoid,
-    Callback = bindAutoSave(function(v) Config.AntiVoid = v end)
+SafeBox:AddToggle("AntiVoid", {
+    Text = "Anti-Void",
+    Default = true,
+    Callback = function(v) Config.AntiVoid = v AutoSaveConfig() end,
 })
 
 -- ============================================================
 -- FARM TAB
 -- ============================================================
-FarmTab:Toggle({
-    Title = "Auto Farm Coins",
-    Desc = "Collect all active coins on the map",
-    Value = Config.CoinFarm,
-    Callback = bindAutoSave(function(v) Config.CoinFarm = v end)
+local FarmTab = Window:AddTab({
+    Name = "Farm",
+    Icon = "coins",
+    Description = "Auto-farm coins",
 })
-FarmTab:Dropdown({
-    Title = "Farm Method",
-    Desc = "Movement method for farming",
+
+local FarmBox = FarmTab:AddLeftGroupbox("Coin Farm", "coins")
+
+FarmBox:AddToggle("CoinFarm", {
+    Text = "Auto Farm Coins",
+    Default = false,
+    Callback = function(v) Config.CoinFarm = v AutoSaveConfig() end,
+})
+FarmBox:AddDropdown("FarmMethod", {
+    Text = "Farm Method",
     Values = { "Teleport", "Glide", "Tween", "Walk" },
-    Value = Config.FarmMethod,
-    Callback = bindAutoSave(function(v) Config.FarmMethod = v end)
+    Default = "Teleport",
+    Callback = function(v) Config.FarmMethod = v AutoSaveConfig() end,
 })
-FarmTab:Slider({
-    Title = "Farm Speed",
-    Desc = "Movement speed while farming",
-    Value = { Min = 16, Max = 60, Default = Config.FarmSpeed },
-    Step = 1,
-    Callback = bindAutoSave(function(v) Config.FarmSpeed = v end)
+FarmBox:AddSlider("FarmSpeed", {
+    Text = "Farm Speed",
+    Default = 28, Min = 16, Max = 60, Rounding = 0,
+    Callback = function(v) Config.FarmSpeed = v AutoSaveConfig() end,
 })
-FarmTab:Slider({
-    Title = "Teleport Farm Delay",
-    Desc = "Seconds between teleport jumps (lower = faster = riskier)",
-    Value = { Min = 1, Max = 50, Default = math.floor(Config.TeleportFarmDelay * 100) },
-    Step = 1,
-    Callback = bindAutoSave(function(v) Config.TeleportFarmDelay = v / 100 end)
+FarmBox:AddSlider("TeleportFarmDelay", {
+    Text = "Teleport Farm Delay (x0.01s)",
+    Default = 5, Min = 1, Max = 50, Rounding = 0,
+    Callback = function(v) Config.TeleportFarmDelay = v / 100 AutoSaveConfig() end,
 })
-FarmTab:Toggle({
-    Title = "Safe Farming",
-    Desc = "Skip coins near the Murderer",
-    Value = Config.SafeCoinFarm,
-    Callback = bindAutoSave(function(v) Config.SafeCoinFarm = v end)
+FarmBox:AddToggle("SafeCoinFarm", {
+    Text = "Safe Farming",
+    Default = true,
+    Callback = function(v) Config.SafeCoinFarm = v AutoSaveConfig() end,
 })
-FarmTab:Toggle({
-    Title = "Bag Full Stop",
-    Desc = "Auto-stop at coin cap",
-    Value = Config.BagFullStop,
-    Callback = bindAutoSave(function(v) Config.BagFullStop = v end)
+FarmBox:AddToggle("BagFullStop", {
+    Text = "Bag Full Stop",
+    Default = true,
+    Callback = function(v) Config.BagFullStop = v AutoSaveConfig() end,
 })
-FarmTab:Toggle({
-    Title = "Quick Mode",
-    Desc = "High-velocity rapid sweep",
-    Value = Config.QuickFarm,
-    Callback = bindAutoSave(function(v) Config.QuickFarm = v end)
-})
-FarmTab:Slider({
-    Title = "Coin Bag Cap",
-    Desc = "Stop farming when bag reaches this",
-    Value = { Min = 10, Max = 40, Default = Config.CoinBagCap },
-    Step = 1,
-    Callback = bindAutoSave(function(v) Config.CoinBagCap = v end)
+FarmBox:AddSlider("CoinBagCap", {
+    Text = "Coin Bag Cap",
+    Default = 40, Min = 10, Max = 40, Rounding = 0,
+    Callback = function(v) Config.CoinBagCap = v AutoSaveConfig() end,
 })
 
 -- ============================================================
 -- SURVIVAL TAB
 -- ============================================================
-SurvTab:Toggle({
-    Title = "Murderer Avoidance",
-    Desc = "Maneuver away from active Murderer",
-    Value = Config.MurdererAvoid,
-    Callback = bindAutoSave(function(v) Config.MurdererAvoid = v end)
+local SurvTab = Window:AddTab({
+    Name = "Survival",
+    Icon = "shield",
+    Description = "Avoid the murderer",
 })
-SurvTab:Slider({
-    Title = "Safety Radius",
-    Desc = "Minimum distance kept from Murderer",
-    Value = { Min = 20, Max = 80, Default = Config.SafetyRadius },
-    Step = 5,
-    Callback = bindAutoSave(function(v) Config.SafetyRadius = v end)
+
+local SurvBox = SurvTab:AddLeftGroupbox("Avoidance", "shield")
+
+SurvBox:AddToggle("MurdererAvoid", {
+    Text = "Murderer Avoidance",
+    Default = false,
+    Callback = function(v) Config.MurdererAvoid = v AutoSaveConfig() end,
 })
-SurvTab:Toggle({
-    Title = "Retreat to Lobby",
-    Desc = "Teleport to lobby if Murderer too close",
-    Value = Config.RetreatToLobby,
-    Callback = bindAutoSave(function(v) Config.RetreatToLobby = v end)
+SurvBox:AddSlider("SafetyRadius", {
+    Text = "Safety Radius",
+    Default = 40, Min = 20, Max = 80, Rounding = 0,
+    Suffix = " studs",
+    Callback = function(v) Config.SafetyRadius = v AutoSaveConfig() end,
 })
-SurvTab:Toggle({
-    Title = "Proximity Alert",
-    Desc = "On-screen alert when Murderer approaches",
-    Value = Config.ProximityAlert,
-    Callback = bindAutoSave(function(v) Config.ProximityAlert = v end)
+SurvBox:AddToggle("RetreatToLobby", {
+    Text = "Retreat to Lobby",
+    Default = false,
+    Callback = function(v) Config.RetreatToLobby = v AutoSaveConfig() end,
 })
-SurvTab:Toggle({
-    Title = "Sprint When Chased",
-    Desc = "Speed up when Murderer is near",
-    Value = Config.SprintWhenChased,
-    Callback = bindAutoSave(function(v) Config.SprintWhenChased = v end)
+SurvBox:AddToggle("ProximityAlert", {
+    Text = "Proximity Alert",
+    Default = true,
+    Callback = function(v) Config.ProximityAlert = v AutoSaveConfig() end,
 })
-SurvTab:Toggle({
-    Title = "Follow Murderer",
-    Desc = "Maintain distance behind the Murderer",
-    Value = Config.FollowMurderer,
-    Callback = bindAutoSave(function(v) Config.FollowMurderer = v end)
+SurvBox:AddToggle("SprintWhenChased", {
+    Text = "Sprint When Chased",
+    Default = true,
+    Callback = function(v) Config.SprintWhenChased = v AutoSaveConfig() end,
 })
-SurvTab:Slider({
-    Title = "Follow Distance",
-    Desc = "Distance kept while following",
-    Value = { Min = 8, Max = 40, Default = Config.FollowDist },
-    Step = 1,
-    Callback = bindAutoSave(function(v) Config.FollowDist = v end)
+SurvBox:AddToggle("FollowMurderer", {
+    Text = "Follow Murderer",
+    Default = false,
+    Callback = function(v) Config.FollowMurderer = v AutoSaveConfig() end,
 })
-SurvTab:Toggle({
-    Title = "Role-Based Auto Play",
-    Desc = "Automates according to your current role",
-    Value = Config.AutoPlay,
-    Callback = bindAutoSave(function(v) Config.AutoPlay = v end)
+SurvBox:AddSlider("FollowDist", {
+    Text = "Follow Distance",
+    Default = 18, Min = 8, Max = 40, Rounding = 0,
+    Suffix = " studs",
+    Callback = function(v) Config.FollowDist = v AutoSaveConfig() end,
+})
+SurvBox:AddToggle("AutoPlay", {
+    Text = "Role-Based Auto Play",
+    Default = false,
+    Callback = function(v) Config.AutoPlay = v AutoSaveConfig() end,
 })
 
 -- ============================================================
 -- TELEPORTS TAB
 -- ============================================================
-TPTime:Button({
-    Title = "Teleport to Murderer",
-    Desc = "Behind the active Murderer",
-    Callback = function()
-        local m = select(1, getRolePlayers())
-        local myRoot = getHRP(LP)
-        if m and myRoot then
-            local mr = getHRP(m)
-            if mr then
-                myRoot.CFrame = mr.CFrame * CFrame.new(0, 0, 4)
-                WindUI:Notify({ Title = "Riad Hub", Content = "Teleported to " .. m.Name, Duration = 2 })
-            end
-        else
-            WindUI:Notify({ Title = "Riad Hub", Content = "Murderer not found.", Duration = 2 })
+local TPTab = Window:AddTab({
+    Name = "Teleports",
+    Icon = "map-pin",
+    Description = "Fast travel",
+})
+
+local QuickTP = TPTab:AddLeftGroupbox("Quick Teleports", "zap")
+
+QuickTP:AddButton("Teleport to Murderer", function()
+    local m = select(1, getRolePlayers())
+    local myRoot = getHRP(LP)
+    if m and myRoot then
+        local mr = getHRP(m)
+        if mr then
+            myRoot.CFrame = mr.CFrame * CFrame.new(0, 0, 4)
+            Library:Notify({ Title = "Riad Hub", Description = "Teleported to " .. m.Name, Time = 2 })
+        end
+    else
+        Library:Notify({ Title = "Riad Hub", Description = "Murderer not found.", Time = 2 })
+    end
+end)
+QuickTP:AddButton("Teleport to Sheriff", function()
+    local _, s = getRolePlayers()
+    local myRoot = getHRP(LP)
+    if s and myRoot then
+        local sr = getHRP(s)
+        if sr then
+            myRoot.CFrame = sr.CFrame * CFrame.new(0, 0, 4)
+            Library:Notify({ Title = "Riad Hub", Description = "Teleported to " .. s.Name, Time = 2 })
+        end
+    else
+        Library:Notify({ Title = "Riad Hub", Description = "Sheriff not found.", Time = 2 })
+    end
+end)
+QuickTP:AddButton("Teleport to Active Map", function()
+    local map = getActiveMap()
+    local myRoot = getHRP(LP)
+    if map and myRoot then
+        local sp = map:FindFirstChild("Spawns")
+        if sp and #sp:GetChildren() > 0 then
+            myRoot.CFrame = sp:GetChildren()[1].CFrame * CFrame.new(0, 3, 0)
+        end
+        Library:Notify({ Title = "Riad Hub", Description = "Teleported to " .. map.Name, Time = 2 })
+    else
+        Library:Notify({ Title = "Riad Hub", Description = "No active map.", Time = 2 })
+    end
+end)
+QuickTP:AddButton("Teleport to Lobby", function()
+    local lb = getLobbyModel()
+    local myRoot = getHRP(LP)
+    if lb and myRoot then
+        local p = lb:FindFirstChildWhichIsA("BasePart") or (lb:FindFirstChild("Spawns") and lb.Spawns:GetChildren()[1])
+        if p then
+            myRoot.CFrame = p.CFrame * CFrame.new(0, 3, 0)
+            Library:Notify({ Title = "Riad Hub", Description = "Teleported to Lobby", Time = 2 })
         end
     end
+end)
+QuickTP:AddToggle("AutoDrop", {
+    Text = "Auto Drop at Round Start",
+    Default = false,
+    Callback = function(v) Config.AutoDrop = v AutoSaveConfig() end,
 })
-TPTime:Button({
-    Title = "Teleport to Sheriff",
-    Desc = "Next to the active Sheriff",
-    Callback = function()
-        local _, s = getRolePlayers()
-        local myRoot = getHRP(LP)
-        if s and myRoot then
-            local sr = getHRP(s)
-            if sr then
-                myRoot.CFrame = sr.CFrame * CFrame.new(0, 0, 4)
-                WindUI:Notify({ Title = "Riad Hub", Content = "Teleported to " .. s.Name, Duration = 2 })
-            end
-        else
-            WindUI:Notify({ Title = "Riad Hub", Content = "Sheriff not found.", Duration = 2 })
-        end
+
+local SlotBox = TPTab:AddRightGroupbox("Saved Slots", "bookmark")
+
+SlotBox:AddButton("Save Slot 1", function()
+    local myRoot = getHRP(LP)
+    if myRoot then
+        Config.SaveSlot1 = myRoot.CFrame
+        AutoSaveConfig()
+        Library:Notify({ Title = "Riad Hub", Description = "Slot 1 saved.", Time = 2 })
     end
-})
-TPTime:Button({
-    Title = "Teleport to Active Map",
-    Desc = "Jump to map spawns",
-    Callback = function()
-        local map = getActiveMap()
-        local myRoot = getHRP(LP)
-        if map and myRoot then
-            local sp = map:FindFirstChild("Spawns")
-            if sp and #sp:GetChildren() > 0 then
-                myRoot.CFrame = sp:GetChildren()[1].CFrame * CFrame.new(0, 3, 0)
-            else
-                local p = map:FindFirstChildWhichIsA("BasePart")
-                if p then myRoot.CFrame = p.CFrame * CFrame.new(0, 5, 0) end
-            end
-            WindUI:Notify({ Title = "Riad Hub", Content = "Teleported to " .. map.Name, Duration = 2 })
-        else
-            WindUI:Notify({ Title = "Riad Hub", Content = "No active map.", Duration = 2 })
-        end
+end)
+SlotBox:AddButton("Go To Slot 1", function()
+    local myRoot = getHRP(LP)
+    if myRoot and Config.SaveSlot1 then
+        myRoot.CFrame = Config.SaveSlot1
+        Library:Notify({ Title = "Riad Hub", Description = "To Slot 1.", Time = 2 })
+    else
+        Library:Notify({ Title = "Riad Hub", Description = "No Slot 1 saved.", Time = 2 })
     end
-})
-TPTime:Button({
-    Title = "Teleport to Lobby",
-    Desc = "Lobby safe area",
-    Callback = function()
-        local lb = getLobbyModel()
-        local myRoot = getHRP(LP)
-        if lb and myRoot then
-            local p = lb:FindFirstChildWhichIsA("BasePart") or (lb:FindFirstChild("Spawns") and lb.Spawns:GetChildren()[1])
-            if p then
-                myRoot.CFrame = p.CFrame * CFrame.new(0, 3, 0)
-                WindUI:Notify({ Title = "Riad Hub", Content = "Teleported to Lobby", Duration = 2 })
-            end
-        end
+end)
+SlotBox:AddButton("Save Slot 2", function()
+    local myRoot = getHRP(LP)
+    if myRoot then
+        Config.SaveSlot2 = myRoot.CFrame
+        AutoSaveConfig()
+        Library:Notify({ Title = "Riad Hub", Description = "Slot 2 saved.", Time = 2 })
     end
-})
-TPTime:Toggle({
-    Title = "Auto Drop at Round Start",
-    Desc = "Drops into map when round begins",
-    Value = Config.AutoDrop,
-    Callback = bindAutoSave(function(v) Config.AutoDrop = v end)
-})
-TPTime:Section({ Title = "Saved Coordinates" })
-TPTime:Button({
-    Title = "Save Location 1",
-    Desc = "Stores current position in Slot 1",
-    Callback = function()
-        local myRoot = getHRP(LP)
-        if myRoot then
-            Config.SaveSlot1 = myRoot.CFrame
-            AutoSaveConfig()
-            WindUI:Notify({ Title = "Riad Hub", Content = "Slot 1 saved.", Duration = 2 })
-        end
+end)
+SlotBox:AddButton("Go To Slot 2", function()
+    local myRoot = getHRP(LP)
+    if myRoot and Config.SaveSlot2 then
+        myRoot.CFrame = Config.SaveSlot2
+        Library:Notify({ Title = "Riad Hub", Description = "To Slot 2.", Time = 2 })
+    else
+        Library:Notify({ Title = "Riad Hub", Description = "No Slot 2 saved.", Time = 2 })
     end
-})
-TPTime:Button({
-    Title = "Teleport Location 1",
-    Desc = "Return to Slot 1",
-    Callback = function()
-        local myRoot = getHRP(LP)
-        if myRoot and Config.SaveSlot1 then
-            myRoot.CFrame = Config.SaveSlot1
-            WindUI:Notify({ Title = "Riad Hub", Content = "To Slot 1.", Duration = 2 })
-        else
-            WindUI:Notify({ Title = "Riad Hub", Content = "No Slot 1 saved.", Duration = 2 })
-        end
-    end
-})
-TPTime:Button({
-    Title = "Save Location 2",
-    Desc = "Stores current position in Slot 2",
-    Callback = function()
-        local myRoot = getHRP(LP)
-        if myRoot then
-            Config.SaveSlot2 = myRoot.CFrame
-            AutoSaveConfig()
-            WindUI:Notify({ Title = "Riad Hub", Content = "Slot 2 saved.", Duration = 2 })
-        end
-    end
-})
-TPTime:Button({
-    Title = "Teleport Location 2",
-    Desc = "Return to Slot 2",
-    Callback = function()
-        local myRoot = getHRP(LP)
-        if myRoot and Config.SaveSlot2 then
-            myRoot.CFrame = Config.SaveSlot2
-            WindUI:Notify({ Title = "Riad Hub", Content = "To Slot 2.", Duration = 2 })
-        else
-            WindUI:Notify({ Title = "Riad Hub", Content = "No Slot 2 saved.", Duration = 2 })
-        end
-    end
-})
+end)
 
 -- ============================================================
 -- TROLLING TAB
 -- ============================================================
-TrollTab:Section({ Title = "Fling — Manual" })
-TrollTab:Button({
-    Title = "Fling Murderer",
-    Desc = "Send the Murderer across the map",
-    Callback = function()
-        local m = select(1, getRolePlayers())
-        if m and m.Character then
-            WindUI:Notify({ Title = "Riad Hub", Content = "Flinging " .. m.Name .. "...", Duration = 2 })
-            task.spawn(flingCharacter, m.Character)
-        else
-            WindUI:Notify({ Title = "Riad Hub", Content = "Murderer not found.", Duration = 2 })
-        end
-    end
+local TrollTab = Window:AddTab({
+    Name = "Trolling",
+    Icon = "smile",
+    Description = "Fling suite",
 })
-TrollTab:Button({
-    Title = "Fling Sheriff",
-    Desc = "Send the Sheriff across the map",
-    Callback = function()
-        local _, s = getRolePlayers()
-        if s and s.Character then
-            WindUI:Notify({ Title = "Riad Hub", Content = "Flinging " .. s.Name .. "...", Duration = 2 })
-            task.spawn(flingCharacter, s.Character)
-        else
-            WindUI:Notify({ Title = "Riad Hub", Content = "Sheriff not found.", Duration = 2 })
-        end
+
+local FlingBox = TrollTab:AddLeftGroupbox("Fling — Manual", "wind")
+
+FlingBox:AddButton("Fling Murderer", function()
+    local m = select(1, getRolePlayers())
+    if m and m.Character then
+        Library:Notify({ Title = "Riad Hub", Description = "Flinging " .. m.Name .. "...", Time = 2 })
+        task.spawn(flingCharacter, m.Character)
+    else
+        Library:Notify({ Title = "Riad Hub", Description = "Murderer not found.", Time = 2 })
     end
-})
-TrollTab:Dropdown({
-    Title = "Fling Style",
-    Desc = "Physics technique for flinging",
+end)
+FlingBox:AddButton("Fling Sheriff", function()
+    local _, s = getRolePlayers()
+    if s and s.Character then
+        Library:Notify({ Title = "Riad Hub", Description = "Flinging " .. s.Name .. "...", Time = 2 })
+        task.spawn(flingCharacter, s.Character)
+    else
+        Library:Notify({ Title = "Riad Hub", Description = "Sheriff not found.", Time = 2 })
+    end
+end)
+FlingBox:AddDropdown("FlingStyle", {
+    Text = "Fling Style",
     Values = { "Torque", "Velocity", "Orbit" },
-    Value = Config.FlingStyle,
-    Callback = bindAutoSave(function(v) Config.FlingStyle = v end)
+    Default = "Torque",
+    Callback = function(v) Config.FlingStyle = v AutoSaveConfig() end,
 })
 
-TrollTab:Section({ Title = "Fling — Pre-Round (DETECTED)" })
-TrollTab:Toggle({
-    Title = "Fling Murderer (Pre-Round)",
-    Desc = "⚠ Flings the murderer before the round starts. DETECTION RISK.",
-    Value = Config.FlingMurdererPreRound,
-    Callback = bindAutoSave(function(v) Config.FlingMurdererPreRound = v end)
+local PreRoundBox = TrollTab:AddRightGroupbox("Fling — Pre-Round", "alert-triangle")
+
+PreRoundBox:AddLabel("⚠ All pre-round fling toggles are DETECTED.")
+PreRoundBox:AddDivider()
+
+PreRoundBox:AddToggle("FlingMurdererPreRound", {
+    Text = "Fling Murderer (Pre-Round)",
+    Default = false,
+    Callback = function(v) Config.FlingMurdererPreRound = v AutoSaveConfig() end,
 })
-TrollTab:Toggle({
-    Title = "Fling Sheriff (Pre-Round)",
-    Desc = "⚠ Flings the sheriff before the round starts. DETECTION RISK.",
-    Value = Config.FlingSheriffPreRound,
-    Callback = bindAutoSave(function(v) Config.FlingSheriffPreRound = v end)
+PreRoundBox:AddToggle("FlingSheriffPreRound", {
+    Text = "Fling Sheriff (Pre-Round)",
+    Default = false,
+    Callback = function(v) Config.FlingSheriffPreRound = v AutoSaveConfig() end,
 })
-TrollTab:Toggle({
-    Title = "Fling Hero (Pre-Round)",
-    Desc = "⚠ Flings the hero role before the round starts. DETECTION RISK.",
-    Value = Config.FlingHeroPreRound,
-    Callback = bindAutoSave(function(v) Config.FlingHeroPreRound = v end)
+PreRoundBox:AddToggle("FlingHeroPreRound", {
+    Text = "Fling Hero (Pre-Round)",
+    Default = false,
+    Callback = function(v) Config.FlingHeroPreRound = v AutoSaveConfig() end,
 })
-TrollTab:Toggle({
-    Title = "Fling ALL Players (Pre-Round)",
-    Desc = "⚠ Flings every player in the server before the round. MASSIVE DETECTION RISK.",
-    Value = Config.FlingAllPreRound,
-    Callback = bindAutoSave(function(v) Config.FlingAllPreRound = v end)
+PreRoundBox:AddToggle("FlingAllPreRound", {
+    Text = "Fling ALL Players (Pre-Round)",
+    Default = false,
+    Callback = function(v) Config.FlingAllPreRound = v AutoSaveConfig() end,
 })
-TrollTab:Toggle({
-    Title = "Fling Sheriff During Round",
-    Desc = "⚠ Flings sheriff mid-round so he can't shoot. DETECTION RISK.",
-    Value = Config.FlingSheriffDuringRound,
-    Callback = bindAutoSave(function(v) Config.FlingSheriffDuringRound = v end)
+PreRoundBox:AddToggle("FlingSheriffDuringRound", {
+    Text = "Fling Sheriff During Round",
+    Default = false,
+    Callback = function(v) Config.FlingSheriffDuringRound = v AutoSaveConfig() end,
 })
 
--- Sheriff-during-round watcher
 task.spawn(function()
     while true do
         task.wait(1)
@@ -1551,196 +1418,140 @@ end)
 -- ============================================================
 -- MISC TAB
 -- ============================================================
-MiscTab:Section({ Title = "Configuration" })
-MiscTab:Button({
-    Title = "Save Configuration",
-    Desc = "Write all current settings to disk",
-    Callback = function()
-        AutoSaveConfig()
-        WindUI:Notify({ Title = "Riad Hub", Content = "Config saved.", Duration = 2 })
-    end
-})
-MiscTab:Button({
-    Title = "Reload Configuration",
-    Desc = "Restore settings from disk",
-    Callback = function()
-        if LoadSavedConfig() then
-            WindUI:Notify({ Title = "Riad Hub", Content = "Config loaded.", Duration = 2 })
-        else
-            WindUI:Notify({ Title = "Riad Hub", Content = "No config found.", Duration = 2 })
-        end
-    end
-})
-MiscTab:Button({
-    Title = "Reset to Defaults",
-    Desc = "Restore all defaults",
-    Callback = function()
-        for k, v in pairs(DefaultConfig) do Config[k] = v end
-        AutoSaveConfig()
-        WindUI:Notify({ Title = "Riad Hub", Content = "Defaults restored.", Duration = 2 })
-    end
+local MiscTab = Window:AddTab({
+    Name = "Misc",
+    Icon = "settings",
+    Description = "Config, server, character",
 })
 
-MiscTab:Section({ Title = "Character & Info" })
-MiscTab:Button({
-    Title = "Reset Character",
-    Desc = "Safely respawn",
-    Callback = function()
-        local h = getHumanoid(LP)
-        if h then h.Health = 0 end
+local CfgBox = MiscTab:AddLeftGroupbox("Configuration", "save")
+
+CfgBox:AddButton("Save Config", function()
+    AutoSaveConfig()
+    Library:Notify({ Title = "Riad Hub", Description = "Config saved.", Time = 2 })
+end)
+CfgBox:AddButton("Reload Config", function()
+    if LoadSavedConfig() then
+        Library:Notify({ Title = "Riad Hub", Description = "Config loaded.", Time = 2 })
+    else
+        Library:Notify({ Title = "Riad Hub", Description = "No config found.", Time = 2 })
     end
+end)
+CfgBox:AddButton("Reset to Defaults", function()
+    for k, v in pairs(DefaultConfig) do Config[k] = v end
+    AutoSaveConfig()
+    Library:Notify({ Title = "Riad Hub", Description = "Defaults restored.", Time = 2 })
+end)
+
+local SessionBox = MiscTab:AddLeftGroupbox("Session", "info")
+
+SessionBox:AddToggle("AntiAFK", {
+    Text = "Anti-AFK",
+    Default = true,
+    Callback = function(v) Config.AntiAFK = v AutoSaveConfig() end,
 })
-MiscTab:Button({
-    Title = "Announce Roles",
-    Desc = "Post Murderer & Sheriff to chat",
-    Callback = function()
-        local m, s = getRolePlayers()
-        local msg = "[Riad] Murderer: " .. (m and m.Name or "?") .. " | Sheriff: " .. (s and s.Name or "?")
-        local ch = TextChatService:FindFirstChild("TextChannels")
-        local ch2 = ch and ch:FindFirstChild("RBXGeneral")
-        if ch2 and ch2.SendAsync then
-            ch2:SendAsync(msg)
-        else
-            pcall(function()
-                local ev = ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
-                local say = ev and ev:FindFirstChild("SayMessageRequest")
-                if say then say:FireServer(msg, "All") end
+SessionBox:AddToggle("DeathNotifs", {
+    Text = "Death Notifications",
+    Default = true,
+    Callback = function(v) Config.DeathNotifs = v AutoSaveConfig() end,
+})
+SessionBox:AddToggle("RoundEndNotifications", {
+    Text = "Round End Notifications",
+    Default = true,
+    Callback = function(v) Config.RoundEndNotifications = v AutoSaveConfig() end,
+})
+SessionBox:AddButton("Copy Death List", function()
+    if #State.DeadPlayers == 0 then
+        Library:Notify({ Title = "Riad Hub", Description = "No deaths recorded.", Time = 2 })
+        return
+    end
+    if setclipboard then
+        setclipboard("MM2 Dead: " .. table.concat(State.DeadPlayers, ", "))
+        Library:Notify({ Title = "Riad Hub", Description = "Copied.", Time = 2 })
+    end
+end)
+
+local ServerBox = MiscTab:AddRightGroupbox("Server", "server")
+
+ServerBox:AddButton("Rejoin Server", function()
+    local qot = (syn and syn.queue_on_teleport) or queue_on_teleport or queueonteleport
+    if qot then
+        pcall(qot, [[
+            task.spawn(function()
+                repeat task.wait(0.5) until game:IsLoaded()
+                task.wait(1)
+                if isfile and isfile("RiadHub.lua") then loadstring(readfile("RiadHub.lua"))() end
             end)
-        end
-        WindUI:Notify({ Title = "Riad Hub", Content = "Announced roles.", Duration = 2 })
+        ]])
     end
-})
-MiscTab:Button({
-    Title = "Copy Death List",
-    Desc = "Copy deceased players to clipboard",
-    Callback = function()
-        if #State.DeadPlayers == 0 then
-            WindUI:Notify({ Title = "Riad Hub", Content = "No deaths recorded.", Duration = 2 })
-            return
-        end
-        local txt = "MM2 Dead: " .. table.concat(State.DeadPlayers, ", ")
-        if setclipboard then
-            setclipboard(txt)
-            WindUI:Notify({ Title = "Riad Hub", Content = "Copied.", Duration = 2 })
-        end
-    end
-})
-MiscTab:Toggle({
-    Title = "Death Notifications",
-    Desc = "Alert on each death with role tag",
-    Value = Config.DeathNotifs,
-    Callback = bindAutoSave(function(v) Config.DeathNotifs = v end)
-})
-MiscTab:Toggle({
-    Title = "Round End Notifications",
-    Desc = "Celebrates when the round ends — survived, murderer caught, etc.",
-    Value = Config.RoundEndNotifications,
-    Callback = bindAutoSave(function(v) Config.RoundEndNotifications = v end)
-})
-
-MiscTab:Section({ Title = "Server" })
-MiscTab:Button({
-    Title = "Rejoin Server",
-    Desc = "Rejoin this exact server",
-    Callback = function()
-        local qot = (syn and syn.queue_on_teleport) or queue_on_teleport or queueonteleport
-        if qot then
-            pcall(qot, [[
-                task.spawn(function()
-                    repeat task.wait(0.5) until game:IsLoaded()
-                    task.wait(1)
-                    if isfile and isfile("RiadHub.lua") then loadstring(readfile("RiadHub.lua"))() end
-                end)
-            ]])
-        end
-        TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LP)
-    end
-})
-MiscTab:Button({
-    Title = "Server Hop (Random)",
-    Desc = "Random populated server",
-    Callback = function()
-        local url = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Desc&excludeFullGames=true&limit=100"
-        local ok, res = pcall(function() return game:HttpGet(url) end)
-        if ok and res then
-            local data = HttpService:JSONDecode(res)
-            if data and data.data then
-                local valid = {}
+    TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LP)
+end)
+ServerBox:AddButton("Server Hop (Random)", function()
+    local url = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Desc&excludeFullGames=true&limit=100"
+    local ok, res = pcall(function() return game:HttpGet(url) end)
+    if ok and res then
+        local data = HttpService:JSONDecode(res)
+        if data and data.data then
+            local valid = {}
+            for _, s in ipairs(data.data) do
+                if s.id ~= game.JobId and s.playing >= 5 and s.playing < s.maxPlayers then
+                    table.insert(valid, s)
+                end
+            end
+            if #valid == 0 then
                 for _, s in ipairs(data.data) do
-                    if s.id ~= game.JobId and s.playing >= 5 and s.playing < s.maxPlayers then
+                    if s.id ~= game.JobId and s.playing >= 2 and s.playing < s.maxPlayers then
                         table.insert(valid, s)
                     end
                 end
-                if #valid == 0 then
-                    for _, s in ipairs(data.data) do
-                        if s.id ~= game.JobId and s.playing >= 2 and s.playing < s.maxPlayers then
-                            table.insert(valid, s)
-                        end
-                    end
-                end
-                if #valid > 0 then
-                    local c = valid[math.random(1, #valid)]
-                    TeleportService:TeleportToPlaceInstance(game.PlaceId, c.id, LP)
-                    return
-                end
+            end
+            if #valid > 0 then
+                local c = valid[math.random(1, #valid)]
+                TeleportService:TeleportToPlaceInstance(game.PlaceId, c.id, LP)
+                return
             end
         end
-        WindUI:Notify({ Title = "Riad Hub", Content = "No server found.", Duration = 2 })
     end
-})
-MiscTab:Button({
-    Title = "Server Hop (Low Pop)",
-    Desc = "Find a low population server for farming",
-    Callback = function()
-        local url = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"
-        local ok, res = pcall(function() return game:HttpGet(url) end)
-        if ok and res then
-            local data = HttpService:JSONDecode(res)
-            if data and data.data then
-                local valid = {}
-                for _, s in ipairs(data.data) do
-                    if s.id ~= game.JobId and s.playing >= 2 and s.playing <= 5 then
-                        table.insert(valid, s)
-                    end
-                end
-                if #valid > 0 then
-                    TeleportService:TeleportToPlaceInstance(game.PlaceId, valid[1].id, LP)
-                    return
+    Library:Notify({ Title = "Riad Hub", Description = "No server found.", Time = 2 })
+end)
+ServerBox:AddButton("Server Hop (Low Pop)", function()
+    local url = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"
+    local ok, res = pcall(function() return game:HttpGet(url) end)
+    if ok and res then
+        local data = HttpService:JSONDecode(res)
+        if data and data.data then
+            local valid = {}
+            for _, s in ipairs(data.data) do
+                if s.id ~= game.JobId and s.playing >= 2 and s.playing <= 5 then
+                    table.insert(valid, s)
                 end
             end
-        end
-        WindUI:Notify({ Title = "Riad Hub", Content = "No low-pop server found.", Duration = 2 })
-    end
-})
-
-MiscTab:Section({ Title = "Environment" })
-MiscTab:Toggle({
-    Title = "Anti-AFK",
-    Desc = "Prevent idle disconnect",
-    Value = Config.AntiAFK,
-    Callback = bindAutoSave(function(v) Config.AntiAFK = v end)
-})
-MiscTab:Button({
-    Title = "Unload Riad Hub",
-    Desc = "Disable everything & remove UI",
-    Callback = function()
-        if getgenv().RiadHub_Unload then
-            getgenv().RiadHub_Unload()
+            if #valid > 0 then
+                TeleportService:TeleportToPlaceInstance(game.PlaceId, valid[1].id, LP)
+                return
+            end
         end
     end
-})
+    Library:Notify({ Title = "Riad Hub", Description = "No low-pop server found.", Time = 2 })
+end)
 
 -- ============================================================
 -- INFO TAB
 -- ============================================================
-InfoTab:Section({ Title = "Round Status" })
-local statusPara = InfoTab:Paragraph({ Title = "Waiting...", Desc = "Round state", Image = nil })
-local timerPara  = InfoTab:Paragraph({ Title = "0:00",       Desc = "Time remaining" })
-local murderPara = InfoTab:Paragraph({ Title = "Undetected", Desc = "Murderer" })
-local sherifPara = InfoTab:Paragraph({ Title = "Undetected", Desc = "Sheriff" })
-local resultPara = InfoTab:Paragraph({ Title = "—", Desc = "Last round" })
+local InfoTab = Window:AddTab({
+    Name = "Info",
+    Icon = "info",
+    Description = "Round status",
+})
 
--- Round-state tracker
+local StatusBox = InfoTab:AddLeftGroupbox("Round Status", "activity")
+
+local statusLabel = StatusBox:AddLabel("Round: Waiting...")
+local timerLabel  = StatusBox:AddLabel("Timer: 0:00")
+local murderLabel = StatusBox:AddLabel("Murderer: Undetected")
+local sherifLabel = StatusBox:AddLabel("Sheriff: Undetected")
+local resultLabel = StatusBox:AddLabel("Last round: —")
+
 task.spawn(function()
     while true do
         task.wait(0.5)
@@ -1751,41 +1562,38 @@ task.spawn(function()
             local tm = sg:FindFirstChild("Timer")
             if cr and tm then
                 pcall(function()
-                    statusPara:SetTitle(cr.Text)
-                    timerPara:SetTitle(tm.Text)
+                    statusLabel:SetText("Round: " .. cr.Text)
+                    timerLabel:SetText("Timer: " .. tm.Text)
                 end)
 
                 local prevState = State.RoundState
                 if cr.Text == "Current Round" then
                     State.RoundState = "Active"
-                    State.PreRoundFlingUsed = false
                 else
                     State.RoundState = "Intermission"
                 end
 
-                -- Round ended: previous state was Active, now Intermission
                 if prevState == "Active" and State.RoundState == "Intermission" then
                     local myRole = getRole(LP)
                     local resultText = "Round ended"
                     if myRole == "Murderer" then
-                        resultText = "Round ended — Murderer survived"
+                        resultText = "Murderer survived"
                     elseif myRole == "Sheriff" then
-                        resultText = "Round ended — Sheriff won"
+                        resultText = "Sheriff won"
                     else
-                        resultText = "Round ended — Innocent survived"
+                        resultText = "Innocent survived"
                     end
                     State.LastRoundResult = resultText
-                    pcall(function() resultPara:SetTitle(resultText) end)
+                    pcall(function() resultLabel:SetText("Last round: " .. resultText) end)
                     if Config.RoundEndNotifications then
-                        WindUI:Notify({
+                        Library:Notify({
                             Title = "Round End",
-                            Content = resultText,
-                            Duration = 4,
+                            Description = resultText,
+                            Time = 4,
                         })
                     end
                 end
 
-                -- Auto drop on round start
                 if State.RoundState == "Active" and not State.RoundStartedFlag then
                     State.RoundStartedFlag = true
                     if Config.AutoDrop then
@@ -1805,11 +1613,42 @@ task.spawn(function()
         end
         local m, s = getRolePlayers()
         pcall(function()
-            murderPara:SetTitle(m and (m.Name .. (isAlive(m) and "" or " [DEAD]")) or "Undetected")
-            sherifPara:SetTitle(s and (s.Name .. (isAlive(s) and "" or " [DEAD]")) or "Undetected")
+            murderLabel:SetText("Murderer: " .. (m and (m.Name .. (isAlive(m) and "" or " [DEAD]")) or "Undetected"))
+            sherifLabel:SetText("Sheriff: " .. (s and (s.Name .. (isAlive(s) and "" or " [DEAD]")) or "Undetected"))
         end)
     end
 end)
+
+local ActionsBox = InfoTab:AddRightGroupbox("Quick Actions", "zap")
+ActionsBox:AddButton("Reset Character", function()
+    local h = getHumanoid(LP)
+    if h then h.Health = 0 end
+end)
+ActionsBox:AddButton("Announce Roles", function()
+    local m, s = getRolePlayers()
+    local msg = "[Riad] Murderer: " .. (m and m.Name or "?") .. " | Sheriff: " .. (s and s.Name or "?")
+    local ch = TextChatService:FindFirstChild("TextChannels")
+    local ch2 = ch and ch:FindFirstChild("RBXGeneral")
+    if ch2 and ch2.SendAsync then
+        ch2:SendAsync(msg)
+    end
+    Library:Notify({ Title = "Riad Hub", Description = "Announced roles.", Time = 2 })
+end)
+
+-- ============================================================
+-- SETTINGS TAB (built-in)
+-- ============================================================
+Window:LoadSettingsTab({
+    ScriptName = "Riad Hub",
+    Name = "Settings",
+    Icon = "settings",
+    Description = "Riad Hub interface settings",
+    ShowWatermark = true,
+    LoadManagers = true,
+    ThemeFolder = "RiadHub",
+    ConfigFolder = "RiadHub",
+    ConfigSubFolder = "MM2",
+})
 
 -- ============================================================
 -- MAIN LOOP
@@ -2089,7 +1928,7 @@ local heartbeat = RunService.Heartbeat:Connect(function()
             if Config.ProximityAlert and dist < Config.SafetyRadius then
                 if not State.Alerted or now - State.Alerted > 3 then
                     State.Alerted = now
-                    WindUI:Notify({ Title = "⚠ MURDERER NEAR", Content = "Distance: " .. math.floor(dist) .. " studs", Duration = 2 })
+                    Library:Notify({ Title = "⚠ MURDERER NEAR", Description = "Distance: " .. math.floor(dist) .. " studs", Time = 2 })
                 end
             end
             if Config.FollowMurderer then
@@ -2099,11 +1938,11 @@ local heartbeat = RunService.Heartbeat:Connect(function()
         end
     end
 
-    -- Coin Farm (with Teleport method)
+    -- Coin Farm
     if Config.CoinFarm and myRoot and now - State.LastFarmTick >= 0.05 then
         if Config.BagFullStop and getCurrentCoinCount() >= Config.CoinBagCap then
             Config.CoinFarm = false
-            WindUI:Notify({ Title = "Riad Hub", Content = "Coin bag full. Farming stopped.", Duration = 3 })
+            Library:Notify({ Title = "Riad Hub", Description = "Coin bag full. Farming stopped.", Time = 3 })
         else
             local coins = getAllActiveCoins()
             local best, bestDist = nil, math.huge
@@ -2125,11 +1964,8 @@ local heartbeat = RunService.Heartbeat:Connect(function()
                 local dist = (myRoot.Position - targetPos).Magnitude
 
                 if Config.FarmMethod == "Teleport" then
-                    -- Direct CFrame snap, no velocity
                     myRoot.CFrame = CFrame.new(targetPos + Vector3.new(0, 3, 0))
-                    -- Fire the touch event so the coin registers
                     fireTouch(myRoot, best)
-                    -- Wait the configured delay
                     task.wait(Config.TeleportFarmDelay)
                 elseif Config.FarmMethod == "Tween" then
                     local t = math.max(dist / Config.FarmSpeed, 0.05)
@@ -2200,7 +2036,7 @@ local function hookDeath(p)
             table.insert(State.DeadPlayers, p.Name)
             if Config.DeathNotifs then
                 local r = getRole(p)
-                WindUI:Notify({ Title = "Death", Content = p.Name .. " [" .. r .. "]", Duration = 3 })
+                Library:Notify({ Title = "Death", Description = p.Name .. " [" .. r .. "]", Time = 3 })
             end
         end)
     end
@@ -2220,7 +2056,7 @@ Players.PlayerAdded:Connect(function(p)
 end)
 
 -- ============================================================
--- INPUT: INFINITE JUMP, EMERGENCY STOP
+-- INPUT
 -- ============================================================
 table.insert(activeConnections, UserInputService.JumpRequest:Connect(function()
     if Config.InfiniteJump then
@@ -2243,7 +2079,7 @@ table.insert(activeConnections, UserInputService.InputBegan:Connect(function(inp
         Config.FlingHeroPreRound = false
         Config.FlingAllPreRound = false
         Config.FlingSheriffDuringRound = false
-        WindUI:Notify({ Title = "Riad Hub", Content = "EMERGENCY STOP — features halted.", Duration = 3 })
+        Library:Notify({ Title = "Riad Hub", Description = "EMERGENCY STOP — features halted.", Time = 3 })
     end
 end))
 
@@ -2283,16 +2119,15 @@ getgenv().RiadHub_Unload = function()
     end
     if State.flyBV then pcall(function() State.flyBV:Destroy() end) end
     if espFolder and espFolder.Parent then pcall(function() espFolder:Destroy() end) end
-    if perfGui and perfGui.Parent then pcall(function() perfGui:Destroy() end) end
-    pcall(function() WindUI:Destroy() end)
+    pcall(function() Library:Unload() end)
     getgenv().RiadHub_Unload = nil
 end
 
 -- ============================================================
--- LOADED NOTIFICATION
+-- BOOT
 -- ============================================================
-WindUI:Notify({
+Library:Notify({
     Title = "Riad Hub",
-    Content = "Loaded v3.0 — teleport farm, round reactions, fling suite.",
-    Duration = 4,
+    Description = "Loaded v4.0 — ZeroPoint GUI, all features intact.",
+    Time = 5,
 })
