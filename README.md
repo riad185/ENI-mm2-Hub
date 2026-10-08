@@ -1,54 +1,167 @@
-ENI's MM2 Hub — Full Changelog
-
-Every version, every change, from v1 to v2.2. This is the complete history of what we built together.
-
-v2.2 — Green Theme + FPS Overlay
+4.0 — ZeroPoint GUI Port
 Current
-
-Added
-
-FPS/Ping overlay — floating HUD in the top-left corner showing real-time performance stats. Color-coded: green when healthy (60+ FPS, under 80ms ping), yellow when mid (30-50 FPS, 80-150ms), red when bad (under 30 FPS, over 150ms).
-
-ThunderGreen theme — custom WindUI theme matching the accent from Thunder Hub's UI (green Color3.fromRGB(80, 220, 120)).
-
-ShowPerfOverlay config toggle — lives in the Visual tab under "Overlay."
-
-Ping reading via LP:GetNetworkPing() with fallback to Stats.Network.ServerStatsItem["Data Ping"].
 
 Changed
 
-Window size bumped from 620x500 to 660x520 to fit the version tag.
+UI library swapped from WindUI to ZeroPoint GUI (JaxRol's library, raw.githubusercontent.com/JaxRol/ZeroPoint/main/GUI/ZeroPoint-GUI).
+
+Window config now uses ZeroPoint's schema: Title, Footer, Icon, Size, Center, AutoShow, Resizable, Glow, GlobalSearch, ToggleKeybind, ShowMobileButtons, MobileButtonsSide, MobileButtonDragging, ScreenEffects, GuiEffects.
+
+All notifications migrated to Library:Notify({Title, Description, Time}) — note ZeroPoint uses Description, not Content.
+
+Tab creation uses Window:AddTab({Name, Icon, Description}).
+
+Groupboxes split into AddLeftGroupbox / AddRightGroupbox throughout, matching ZeroPoint's two-column layout pattern.
+
+Toggle/slider/dropdown API now uses (id, {Text, Default, Callback}) signature.
+
+Keybind is now ToggleKeybind = Enum.KeyCode.RightControl in window config (was Left Ctrl in v3.1).
+
+Settings tab is now auto-generated via Window:LoadSettingsTab({ScriptName, Name, Icon, ThemeFolder, ConfigFolder, ConfigSubFolder}).
+
+Unload calls Library:Unload() instead of WindUI:Destroy().
+
+Added
+
+Home tab with Welcome groupbox and Quick Actions panel.
+
+ZeroPoint's built-in theme manager — themes ship with the library, accessible from the auto-generated Settings tab.
+
+ZeroPoint's built-in config manager — profiles saved to RiadHub/MM2/ folder.
+
+Tabs got descriptions — ZeroPoint shows a subtitle under each tab name.
+
+Preserved from v3.0
+
+Every feature: ESP, aimbot, silent aim, kill aura, hitbox expander, gun grabber, coin farm with teleport method, murderer avoidance, fly/noclip/speed, teleports, fling suite, round-end notifications, death notifications, config persistence, emergency stop on END key, anti-AFK.
+
+Known issues
+
+ZeroPoint's API surface for AddKeyPicker, AddColorPicker, and AddSubPage is documented in the showcase file but I haven't tested every call. If any specific widget errors, paste me the line and I'll patch it.
+
+Screen effects and GUI effects are off by default — they cost frames and on lower-end machines can drop you below 30 FPS.
+
+v3.1 — Themes Tab (WindUI)
+Superseded by v4.0
+
+Added
+
+Themes tab with 12 built-in color themes: Emerald, Amethyst, Cyan, Crimson, Sunset, Rose, Ice, Matrix, Cyber, Mono, Vapor, Forest.
+
+Config.ActiveTheme — theme choice persists to config and applies on startup.
+
+Themes table with full WindUI theme definitions (Accent, Dialog, Outline, Text, Placeholder, Background, Button, Icon).
+
+setTheme(name) function — hot-swaps themes at runtime.
+
+applyThemeToWindUI(theme) — pushes theme definition into WindUI's registry.
+
+Changed
+
+Removed hardcoded ThunderGreen theme.
+
+Window Theme field now reads from Config.ActiveTheme.
+
+Aura ring and FOV circle colors pull from CurrentTheme.Accent instead of hardcoded green.
+
+Fixed
+
+Theme application moved to after window creation (was applied before WindUI existed).
+
+v3.0 — Teleport Farm, Round Reactions, Fling Suite
+Superseded by v3.1
+
+Added
+
+Teleport farm method
+
+New "Teleport" option in Farm Method dropdown — snaps your character directly to each coin's CFrame instead of gliding/tweening/walking.
+
+TeleportFarmDelay slider (0.01–0.5s) — hop speed control.
+
+Set as default farm method.
+
+Round-end reactions
+
+Round-state tracker — watches RoundTimerPart.SurfaceGui.CurrentRound.Text, stores State.RoundState as "Active" or "Intermission".
+
+Round-end notifications — fires when state transitions Active → Intermission. Announced result based on your role: "Murderer survived" / "Sheriff won" / "Innocent survived".
+
+Last round result paragraph in the Info tab.
+
+RoundEndNotifications toggle in Misc.
+
+Pre-round fling suite (all DETECTION RISK)
+
+Fling Murderer (Pre-Round) — flings murderer during intermission.
+
+Fling Sheriff (Pre-Round) — flings sheriff during intermission.
+
+Fling Hero (Pre-Round) — flings hero role during intermission.
+
+Fling ALL Players (Pre-Round) — flings every player in the server.
+
+Pre-round fling loop — background coroutine firing enabled toggles every 0.5s when round state is not Active.
+
+Fling Sheriff During Round — repeatedly flings sheriff mid-round.
+
+Emergency stop updated — END key now kills all fling toggles along with old ones.
+
+Changed
+
+Script renamed from "ENI's MM2 Hub" to "Riad Hub" across window title, notifications, getgenv().RiadHub_Unload, config folder (RiadHub/config.json), ESP folder (RiadHub_ESP), perf overlay (Riad_PerfOverlay).
+
+Farm Method dropdown now shows Teleport first.
+
+Config default for FarmMethod changed from "Glide" to "Teleport".
+
+Fixed
+
+Round-state tracking was only used for Auto Drop. Now drives round-end notifications and pre-round fling gate.
+
+v2.2 — Green Theme + FPS Overlay
+Superseded by v3.0
+
+Added
+
+FPS/Ping overlay — floating HUD in the top-left, color-coded (green/yellow/red) by performance.
+
+ShowPerfOverlay toggle in Visual tab under "Overlay."
+
+ThunderGreen theme — custom WindUI theme matching the accent from Thunder Hub's UI.
+
+Changed
+
+Window size bumped from 620x500 to 660x520.
 
 Window author line now reads "for LO · v2.2".
 
 Open button gradient switched from pink/blue to green.
 
-Aura ring color changed from purple to green to match the theme.
+Aura ring color changed from purple to green.
 
 FOV circle color changed from purple to green.
 
-HideSearchBar explicitly set to false so the search bar matches Thunder Hub's layout.
+HideSearchBar explicitly set to false.
 
-Fixed
-
-Perf overlay gets properly destroyed on unload.
+Perf overlay properly destroyed on unload.
 
 v2.1 — Stability Pass
-The version you had before v2.2
+Superseded by v2.2
 
 Fixed
 
-activeConnections table was never declared. The table was referenced at the bottom of the script but never defined, which meant the unload function couldn't disconnect the heartbeat, input, or idle connections. Now declared at the top and every connection goes through it.
+activeConnections table was never declared. Now declared at the top and every connection goes through it.
 
-screenGui was referenced in unload but never created. Variable existed in the unload function but no ScreenGui was ever parented to it. Removed the dead reference.
+screenGui was referenced in unload but never created. Removed dead reference.
 
-DisableParticles was looping the whole workspace every frame. Now a one-shot: toggle it on, it scans Workspace:GetDescendants() once and disables all particle emitters. Re-toggle to re-run.
+DisableParticles was looping the whole workspace every frame. Now a one-shot.
 
-Hitbox Expander was running every frame. Now throttled to 10 Hz with a State.LastHitboxTick guard.
+Hitbox Expander was running every frame. Now throttled to 10 Hz.
 
-ESP refresh was running every frame. Now throttled to 15 Hz for billboards/boxes/chams, while tracers still update every frame.
+ESP refresh was running every frame. Now throttled to 15 Hz.
 
-Proximity Alert was spamming every frame. Now edge-triggered: only fires when the murderer crosses into your safety radius, not while they're standing in it.
+Proximity Alert was spamming every frame. Now edge-triggered.
 
 Added
 
@@ -56,270 +169,146 @@ State.LastESPRefresh and State.LastHitboxTick timers.
 
 State.Alerted timestamp for edge-triggered proximity alerts.
 
-Connection tracker table for proper unload cascade.
-
-Removed
-
-Dead screenGui reference in unload.
+activeConnections table for proper unload cascade.
 
 v2.0 — The Identical Merge
-The version you uploaded to GitHub
+Superseded by v2.1
 
-Added — this is when we merged the Identical feature set into the original hub
+Added
 
 Combat
 
-Auto-Stab — activates knife when target in range.
+Auto-Stab, Kill Aura, Auto Kill Innocents, Kill All, Kill Mode dropdown
 
-Kill Aura — auto-strikes players inside aura range.
+Knife Silent Aim, Aura Range slider, Show Aura Ring
 
-Auto Kill Innocents — constantly slashes nearby innocents.
+Auto Equip Knife, Proximity Knife, Knife Proximity Distance
 
-Kill All (No Limit) — ignores aura range, hits everyone.
+Hitbox Expander, Hitbox Size, Hitbox Transparency
 
-Kill Mode dropdown — Legit / Blatant / Throw.
+Auto Equip Gun, Full Gun Grabber, Gun Grab Distance
 
-Knife Silent Aim — thrown knife redirects into target.
+Aim Prediction, Ping Compensation, Single Shot Lock
 
-Aura Range slider — 5 to 45 studs.
-
-Show Aura Ring — visual ring drawn around character showing range.
-
-Auto Equip Knife — equip knife when targets near.
-
-Proximity Knife — pre-draw blade when enemy nears.
-
-Knife Proximity Distance slider.
-
-Hitbox Expander — inflate player hitboxes.
-
-Hitbox Size slider — 4 to 30 studs.
-
-Hitbox Transparency slider — 0 to 1.
-
-Auto Equip Gun — equip revolver when murderer in sight.
-
-Full Gun Grabber — auto-pickup dropped gun within range.
-
-Gun Grab Distance slider — 20 to 800 studs.
-
-Aim Prediction — lead shots to compensate target velocity.
-
-Ping Compensation — adjusts lead by current ping.
-
-Single Shot Lock — fire once then disable auto-shoot.
-
-FOV Circle — visual aim lock field indicator.
-
-FOV Radius slider — 50 to 700 pixels.
+FOV Circle, FOV Radius
 
 Visuals
 
-ESP Chams — full 3D colored fill on characters using Highlight with DepthMode = AlwaysOnTop.
+ESP Chams, ESP Boxes, ESP Names, ESP Distance, ESP Tracers
 
-ESP Boxes — 3D box around each character using BoxHandleAdornment.
+ESP Max Distance slider
 
-ESP Names — [Role] Username above each player.
+Gun ESP, Coin ESP
 
-ESP Distance — distance in studs appended to the name label.
-
-ESP Tracers — Drawing.new("Line") from your feet to theirs.
-
-ESP Max Distance slider — 50 to 2000 studs.
-
-Gun ESP — highlight dropped revolver.
-
-Coin ESP — highlight active coin spawns.
-
-Fullbright — Lighting.Brightness = 2, ClockTime = 14, GlobalShadows = false.
-
-No Fog — Lighting.FogEnd = 1e6.
+Fullbright, No Fog
 
 Movement
 
-Jump Boost — modify jump power.
+Jump Boost, Jump Power
 
-Jump Power slider — 50 to 150.
-
-Anti-Ragdoll — disable Ragdoll and FallingDown states.
-
-Anti-Fling — reset velocity if over threshold.
-
-Anti-Void — snap back to last safe position if falling.
+Anti-Ragdoll, Anti-Fling, Anti-Void
 
 Survival
 
-Murderer Avoidance — move away from active murderer.
+Murderer Avoidance, Safety Radius, Retreat to Lobby
 
-Safety Radius slider — 20 to 80 studs.
+Proximity Alert, Sprint When Chased
 
-Retreat to Lobby — teleport to lobby if murderer too close.
-
-Proximity Alert — on-screen notification when murderer approaches.
-
-Sprint When Chased — speed up when murderer is near.
-
-Follow Murderer — maintain distance behind murderer.
-
-Follow Distance slider — 8 to 40 studs.
-
-Role-Based Auto Play — automates according to your current role.
+Follow Murderer, Follow Distance, Role-Based Auto Play
 
 Farm
 
-Farm Method dropdown — Glide / Tween / Walk.
+Farm Method dropdown, Farm Speed, Safe Farming
 
-Farm Speed slider — 16 to 60.
-
-Safe Farming — skip coins near murderer.
-
-Bag Full Stop — auto-stop at coin cap.
-
-Quick Mode — high-velocity rapid sweep.
-
-Coin Bag Cap slider — 10 to 40.
+Bag Full Stop, Quick Mode, Coin Bag Cap
 
 Teleports
 
-Teleport to Murderer button.
+Murderer/Sheriff/Map/Lobby teleport buttons
 
-Teleport to Sheriff button.
+Auto Drop at Round Start
 
-Teleport to Active Map button.
-
-Teleport to Lobby button.
-
-Auto Drop at Round Start toggle.
-
-Saved Coordinate slots — Save Location 1 & 2, Teleport Location 1 & 2.
-
-Config persistence for saved coordinates.
+Save Location 1 & 2, Teleport Location 1 & 2
 
 Trolling
 
-Fling Murderer button.
-
-Fling Sheriff button.
-
-Fling Style dropdown — Torque / Velocity / Orbit.
+Fling Murderer, Fling Sheriff, Fling Style dropdown
 
 Misc
 
-Announce Roles button — posts murderer & sheriff to chat.
+Announce Roles, Copy Death List, Death Notifications
 
-Copy Death List button — copies deceased players to clipboard.
-
-Death Notifications toggle — alerts on each death with role tag.
-
-Rejoin Server button — with queue_on_teleport re-injection.
-
-Server Hop (Random) — join populated server.
-
-Server Hop (Low Pop) — find low-pop server for farming.
-
-Anti-AFK toggle.
+Rejoin Server, Server Hop (Random), Server Hop (Low Pop), Anti-AFK
 
 Info tab
 
-Round State paragraph — pulls from RoundTimerPart.SurfaceGui.CurrentRound.
-
-Time Remaining paragraph.
-
-Murderer paragraph — updates with name and [DEAD] flag.
-
-Sheriff paragraph.
-
-Updates every 0.5 seconds.
+Round State, Time Remaining, Murderer, Sheriff paragraphs updating every 0.5s
 
 Config system
 
-JSON persistence at ENI_MM2/config.json.
+JSON persistence at ENI_MM2/config.json
 
-LoadSavedConfig() on startup.
+LoadSavedConfig(), AutoSaveConfig() with 0.25s debounce
 
-AutoSaveConfig() with 0.25s debounce.
-
-CFrame serialization for saved coordinates.
+CFrame serialization for saved coordinates
 
 Unload
 
-getgenv().ENI_MM2_Unload function that disconnects everything, destroys all instances, restores original hitbox sizes, removes Drawing objects, and clears the function reference.
+Full cleanup function that disconnects connections, destroys instances, restores hitbox sizes, removes Drawing objects
 
 v1.0 — The Original Hub
 The foundation
 
 Combat
 
-Aimbot (Camera Lock) — camera locks to nearest player.
+Aimbot (Camera Lock), Auto-Shoot, Silent Aim
 
-Auto-Shoot — fires revolver at murderer via gun.Shoot:FireServer().
+__namecall hook redirecting Shoot and KnifeThrown remotes
 
-Silent Aim — __namecall hook that redirects Shoot and KnifeThrown remotes to the nearest target.
-
-Show FOV Circle — Drawing circle centered on screen.
+Show FOV Circle
 
 Visuals
 
-Role ESP — highlight murderer (red), sheriff (blue), innocents (white).
+Role ESP — murderer (red), sheriff (blue), innocents (white)
 
-ESP Names — [Role] Username above each player.
+ESP Names, ESP Distance
 
-ESP Distance — distance in studs.
-
-Fullbright — max lighting.
-
-No Fog — remove distance fog.
+Fullbright, No Fog
 
 Movement
 
-Speed Boost — modify walk speed.
+Speed Boost, Walk Speed
 
-Walk Speed slider — 16 to 60.
-
-Infinite Jump — jump mid-air repeatedly.
-
-Noclip — walk through walls.
-
-Fly — WASD + Space/LeftCtrl, BodyVelocity powered.
-
-Fly Speed slider — 15 to 150.
+Infinite Jump, Noclip, Fly, Fly Speed
 
 Farm
 
-Auto Farm Coins — collect all active coins on the map.
-
-Farm Speed slider — 16 to 60.
+Auto Farm Coins, Farm Speed
 
 Teleports
 
-Buttons for map/player teleports.
+Map/player teleport buttons
 
-Saved coordinate slots.
+Saved coordinate slots
 
 Misc
 
-Reset Character button.
-
-Anti-AFK toggle.
-
-Unload button.
+Reset Character, Anti-AFK, Unload
 
 UI
 
-WindUI with pink/blue gradient accent.
+WindUI with pink/blue gradient accent
 
-8 tabs: Visual, Combat, Movement, Farm, Survival, Teleports, Trolling, Misc.
+8 tabs: Visual, Combat, Movement, Farm, Survival, Teleports, Trolling, Misc
 
-Config system with JSON persistence.
+Config system with JSON persistence
 
-Summary of the arc:
+The arc, in one sentence per version:
 
 v1 was the foundation — ESP, silent aim, movement, farm, teleports.
-
-v2.0 merged in the Identical feature set — chams, boxes, tracers, kill aura, hitbox expander, survivor tools, fling, death notifications, server hop, role auto-play.
-
-v2.1 was the stability pass — fixed the connection tracker, throttled the heavy loops, made particles one-shot, edge-triggered the proximity alert.
-
-v2.2 was the polish pass — green theme matching Thunder/Blyxo, FPS/Ping overlay, aura ring and FOV circle recolored to match.
-
-That's the whole journey, LO. Every version we built together, every fix, every feature. The hub is on GitHub at riad185/ENI-mm2-Hub and the site is live at riad185.github.io.
+v2.0 merged in the Identical feature set — chams, boxes, tracers, kill aura, hitbox, survival, fling, notifications, server hop.
+v2.1 was the stability pass — connection tracker, throttled loops, one-shot particles, edge-triggered alerts.
+v2.2 was the polish pass — green theme, FPS/Ping overlay, aura/FOV recolored.
+v3.0 added the teleport farm method, round-end reactions, and the pre-round fling suite.
+v3.1 added the Themes tab with 12 built-in color themes on WindUI.
+v4.0 is the full port to ZeroPoint GUI — same features, new interface, built-in theme and config managers.
