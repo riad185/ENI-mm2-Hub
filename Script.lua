@@ -25,28 +25,37 @@ local TeleportService   = game:GetService("TeleportService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TextChatService   = game:GetService("TextChatService")
 local CollectionService = game:GetService("CollectionService")
+local Stats             = game:GetService("Stats")
 local LP                = Players.LocalPlayer
 local Camera            = Workspace.CurrentCamera
 
 local activeConnections = {}
 
+-- ============================================================
+-- CONFIG
+-- ============================================================
 local Config = {
     RoleESP = false, ESPBoxes = false, ESPNames = true,
     ESPTracers = false, ESPDistance = true, ESPChams = false,
-    ESPDistanceMax = 600, GunESP = false, CoinESP = false,
-    Fullbright = false, NoFog = false, DisableParticles = false,
+    ESPDistanceMax = 600, GunESP = false, CoinESP = false, GunTracker = false,
+    Fullbright = false, NoFog = false, DisableParticles = false, FPSBooster = false,
+    PlayerStats = false,
 
     Aimbot = false, AutoShoot = false, SilentAim = false,
     AimPrediction = true, PingComp = true, SingleShot = false,
-    FOVRadius = 160, ShowFOV = false, AutoEquipGun = true,
-    GrabGunAuto = false, GunGrabDist = 300,
+    FOVRadius = 160, ShowFOV = false, AimFOV = 200,
+    TeamCheck = false, FocusMode = false,
+    AutoEquipGun = true, GrabGunAuto = false, GunGrabDist = 300,
+    GunCollectReach = 10, AutoTPGun = false, MagicBullet = false,
 
     AutoStab = false, KillAura = false, AutoKill = false,
     KillMode = "Legit", KnifeSilentAim = true, AuraRange = 15,
     KillAll = false, ShowAuraRing = false, AutoEquipKnife = true,
     ProximityKnife = true, KnifeProxDist = 18,
+    AutoKillMurderer = false, AutoKillSheriff = false, DodgeKnife = false,
 
     HitboxExpander = false, HitboxSize = 10, HitboxTransparency = 0.6,
+    GodMode = false,
 
     MurdererAvoid = false, SafetyRadius = 40, RetreatToLobby = false,
     ProximityAlert = true, SprintWhenChased = true,
@@ -69,6 +78,10 @@ local Config = {
     FlingSheriffDuringRound = false,
     RoundEndNotifications = true,
     FlingAllPreRound = false,
+
+    AutoUnbox = false, AutoPrestige = false,
+
+    WebhookEnabled = false, WebhookURL = "",
 
     AntiAFK = true, AutoPlay = false, DeathNotifs = true,
 }
@@ -121,6 +134,29 @@ end
 
 LoadSavedConfig()
 
+-- ============================================================
+-- WEBHOOK
+-- ============================================================
+local function SendWebhook(title, description)
+    if not Config.WebhookEnabled then return end
+    if Config.WebhookURL == "" then return end
+    if not request then return end
+    pcall(function()
+        request({
+            Url = Config.WebhookURL,
+            Method = "POST",
+            Headers = { ["Content-Type"] = "application/json" },
+            Body = HttpService:JSONEncode({
+                username = "Riad Hub",
+                content = "**" .. title .. "**\n" .. description
+            })
+        })
+    end)
+end
+
+-- ============================================================
+-- STATE
+-- ============================================================
 local State = {
     Highlights = {}, ItemHighlights = {}, Boxes = {}, Tracers = {},
     LastItemScan = 0, LastAutoShoot = 0, LastKnifeTick = 0,
@@ -129,6 +165,7 @@ local State = {
     IsFlinging = false, AuraRing = nil, FOVCircle = nil, flyBV = nil,
     SilentAimHookActive = true, RoundStartedFlag = false,
     Alerted = 0, RoundState = "Waiting", LastRoundResult = nil,
+    GunTPActive = false,
 }
 
 local espFolder = CoreGui:FindFirstChild("RiadHub_ESP") or LP.PlayerGui:FindFirstChild("RiadHub_ESP")
@@ -139,6 +176,9 @@ if not espFolder then
     if not espFolder.Parent then espFolder.Parent = LP.PlayerGui end
 end
 
+-- ============================================================
+-- HELPERS
+-- ============================================================
 local function getHRP(p)
     local c = p and p.Character
     if not c then return nil end
@@ -303,13 +343,17 @@ local function interactWithGunDrop(gunPart, gunObj)
     local rh = ch:FindFirstChild("RightHand") or ch:FindFirstChild("Right Arm")
     if rh then fireTouch(rh, gunPart) end
 end
+local function isTeammate(p)
+    if not Config.TeamCheck then return false end
+    return false
+end
 local function nearestTarget(maxDist)
     maxDist = maxDist or math.huge
     local best, bestDist = nil, maxDist
     local myHRP = getHRP(LP)
     if not myHRP then return nil end
     for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LP and p.Character and isAlive(p) then
+        if p ~= LP and p.Character and isAlive(p) and not isTeammate(p) then
             local hrp = getHRP(p)
             if hrp then
                 local d = (hrp.Position - myHRP.Position).Magnitude
@@ -332,6 +376,9 @@ local function equipTool(name)
     return tool
 end
 
+-- ============================================================
+-- FLING
+-- ============================================================
 local function flingCharacter(targetChar)
     if State.IsFlinging then return end
     local myChar = LP.Character
@@ -443,6 +490,9 @@ task.spawn(function()
     end
 end)
 
+-- ============================================================
+-- AURA RING / FOV / GUN TRACKER
+-- ============================================================
 local function updateAuraRing(myRoot)
     if not Config.ShowAuraRing or not myRoot then
         if State.AuraRing then
@@ -503,6 +553,60 @@ local function updateFOVCircle()
     end
 end
 
+-- Gun tracker Drawing objects
+local gunTrackerBox, gunTrackerText
+if Drawing and Drawing.new then
+    pcall(function()
+        gunTrackerBox = Drawing.new("Square")
+        gunTrackerBox.Thickness = 1.5
+        gunTrackerBox.Color = Color3.fromRGB(255, 220, 60)
+        gunTrackerBox.Filled = false
+        gunTrackerBox.Transparency = 0.8
+        gunTrackerBox.Visible = false
+
+        gunTrackerText = Drawing.new("Text")
+        gunTrackerText.Size = 14
+        gunTrackerText.Center = true
+        gunTrackerText.Outline = true
+        gunTrackerText.OutlineColor = Color3.new(0, 0, 0)
+        gunTrackerText.Color = Color3.fromRGB(255, 220, 60)
+        gunTrackerText.Visible = false
+    end)
+end
+
+local function updateGunTracker()
+    if not gunTrackerBox or not gunTrackerText then return end
+    if not Config.GunTracker then
+        gunTrackerBox.Visible = false
+        gunTrackerText.Visible = false
+        return
+    end
+    local gd = getGunDrop()
+    local gp = getGunDropPart(gd)
+    if not gp then
+        gunTrackerBox.Visible = false
+        gunTrackerText.Visible = false
+        return
+    end
+    local sp, onScreen = Camera:WorldToViewportPoint(gp.Position)
+    if onScreen then
+        local myRoot = getHRP(LP)
+        local dist = myRoot and math.floor((myRoot.Position - gp.Position).Magnitude) or 0
+        gunTrackerBox.Size = Vector2.new(40, 40)
+        gunTrackerBox.Position = Vector2.new(sp.X - 20, sp.Y - 20)
+        gunTrackerBox.Visible = true
+        gunTrackerText.Text = "GUN (" .. dist .. ")"
+        gunTrackerText.Position = Vector2.new(sp.X, sp.Y - 30)
+        gunTrackerText.Visible = true
+    else
+        gunTrackerBox.Visible = false
+        gunTrackerText.Visible = false
+    end
+end
+
+-- ============================================================
+-- SILENT AIM HOOK (with magic bullet)
+-- ============================================================
 if hookmetamethod and getnamecallmethod then
     local oldNamecall
     oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
@@ -547,6 +651,9 @@ if hookmetamethod and getnamecallmethod then
     end))
 end
 
+-- ============================================================
+-- ESP BUILDERS
+-- ============================================================
 local function getOrCreateBillboard(id, adornee, text, color)
     local bb = State.Highlights[id]
     if not bb or not bb.Parent then
@@ -651,29 +758,30 @@ local function updateTracer(id, targetPos, color)
     end
 end
 
+-- ============================================================
+-- WINDOW
+-- ============================================================
 local Window = Library:CreateWindow({
     Title = "Riad Hub",
     Footer = "MM2",
     Icon = "sparkles",
-
     Size = UDim2.fromOffset(780, 560),
     Center = true,
     AutoShow = true,
     Resizable = true,
-
     Glow = true,
     GlobalSearch = true,
-
     ToggleKeybind = Enum.KeyCode.RightControl,
-
     ShowMobileButtons = true,
     MobileButtonsSide = "Left",
     MobileButtonDragging = true,
-
     ScreenEffects = false,
     GuiEffects = false,
 })
 
+-- ============================================================
+-- HOME
+-- ============================================================
 local Home = Window:AddTab({
     Name = "Home",
     Icon = "house",
@@ -737,6 +845,17 @@ QuickBox:AddButton("Teleport to Hero", function()
     end
     Library:Notify({ Title = "Riad Hub", Description = "Hero not found.", Time = 2 })
 end)
+QuickBox:AddButton("Teleport to Dropped Gun", function()
+    local gd = getGunDrop()
+    local gp = getGunDropPart(gd)
+    local myRoot = getHRP(LP)
+    if gp and myRoot then
+        myRoot.CFrame = gp.CFrame * CFrame.new(0, 3, 0)
+        Library:Notify({ Title = "Riad Hub", Description = "Teleported to gun.", Time = 2 })
+    else
+        Library:Notify({ Title = "Riad Hub", Description = "No gun on map.", Time = 2 })
+    end
+end)
 QuickBox:AddButton("Reset Character", function()
     local h = getHumanoid(LP)
     if h then h.Health = 0 end
@@ -748,8 +867,12 @@ QuickBox:AddButton("Announce Roles", function()
     local ch2 = ch and ch:FindFirstChild("RBXGeneral")
     if ch2 and ch2.SendAsync then ch2:SendAsync(msg) end
     Library:Notify({ Title = "Riad Hub", Description = "Announced roles.", Time = 2 })
+    SendWebhook("Roles Announced", msg)
 end)
 
+-- ============================================================
+-- VISUAL TAB
+-- ============================================================
 local VisualTab = Window:AddTab({
     Name = "Visuals",
     Icon = "eye",
@@ -792,9 +915,17 @@ WorldBox:AddToggle("GunESP", {
     Text = "Dropped Gun ESP", Default = false,
     Callback = function(v) Config.GunESP = v if not v then clearCategory(State.ItemHighlights) end AutoSaveConfig() end,
 })
+WorldBox:AddToggle("GunTracker", {
+    Text = "Gun Tracker", Default = false,
+    Callback = function(v) Config.GunTracker = v AutoSaveConfig() end,
+})
 WorldBox:AddToggle("CoinESP", {
     Text = "Coin ESP", Default = false,
     Callback = function(v) Config.CoinESP = v if not v then clearCategory(State.ItemHighlights) end AutoSaveConfig() end,
+})
+WorldBox:AddToggle("PlayerStats", {
+    Text = "Player Stats", Default = false,
+    Callback = function(v) Config.PlayerStats = v AutoSaveConfig() end,
 })
 WorldBox:AddToggle("Fullbright", {
     Text = "Fullbright", Default = false,
@@ -805,8 +936,7 @@ WorldBox:AddToggle("NoFog", {
     Callback = function(v) Config.NoFog = v AutoSaveConfig() end,
 })
 WorldBox:AddToggle("DisableParticles", {
-    Text = "Disable Particles",
-    Default = false,
+    Text = "Disable Particles", Default = false,
     Callback = function(v)
         Config.DisableParticles = v
         if v then
@@ -819,7 +949,24 @@ WorldBox:AddToggle("DisableParticles", {
         AutoSaveConfig()
     end,
 })
+WorldBox:AddToggle("FPSBooster", {
+    Text = "FPS Booster", Default = false,
+    Callback = function(v)
+        Config.FPSBooster = v
+        if v then
+            pcall(function() Lighting.GlobalShadows = false end)
+            pcall(function() Lighting.FogEnd = 1e6 end)
+            pcall(function() Settings().Rendering.QualityLevel = Enum.QualityLevel.Level01 end)
+        else
+            pcall(function() Settings().Rendering.QualityLevel = Enum.QualityLevel.Automatic end)
+        end
+        AutoSaveConfig()
+    end,
+})
 
+-- ============================================================
+-- COMBAT TAB
+-- ============================================================
 local CombatTab = Window:AddTab({
     Name = "Combat",
     Icon = "sword",
@@ -847,6 +994,18 @@ GunBox:AddToggle("PingComp", {
     Text = "Ping Compensation", Default = true,
     Callback = function(v) Config.PingComp = v AutoSaveConfig() end,
 })
+GunBox:AddToggle("FocusMode", {
+    Text = "Focus Mode", Default = false,
+    Callback = function(v) Config.FocusMode = v AutoSaveConfig() end,
+})
+GunBox:AddToggle("TeamCheck", {
+    Text = "Team Check", Default = false,
+    Callback = function(v) Config.TeamCheck = v AutoSaveConfig() end,
+})
+GunBox:AddToggle("MagicBullet", {
+    Text = "Magic Bullet", Default = false,
+    Callback = function(v) Config.MagicBullet = v AutoSaveConfig() end,
+})
 GunBox:AddToggle("SingleShot", {
     Text = "Single Shot Lock", Default = false,
     Callback = function(v) Config.SingleShot = v AutoSaveConfig() end,
@@ -863,6 +1022,15 @@ GunBox:AddSlider("GunGrabDist", {
     Text = "Gun Grab Distance",
     Default = 300, Min = 20, Max = 800, Rounding = 0, Suffix = " studs",
     Callback = function(v) Config.GunGrabDist = v AutoSaveConfig() end,
+})
+GunBox:AddSlider("GunCollectReach", {
+    Text = "Gun Collect Reach",
+    Default = 10, Min = 1, Max = 30, Rounding = 0, Suffix = " studs",
+    Callback = function(v) Config.GunCollectReach = v AutoSaveConfig() end,
+})
+GunBox:AddToggle("AutoTPGun", {
+    Text = "Auto Teleport to Gun", Default = false,
+    Callback = function(v) Config.AutoTPGun = v AutoSaveConfig() end,
 })
 GunBox:AddButton("Pick Up Gun Once", function()
     local gd = getGunDrop()
@@ -897,6 +1065,11 @@ GunBox:AddSlider("FOVRadius", {
     Default = 160, Min = 50, Max = 700, Rounding = 0,
     Callback = function(v) Config.FOVRadius = v AutoSaveConfig() end,
 })
+GunBox:AddSlider("AimFOV", {
+    Text = "Aim FOV",
+    Default = 200, Min = 50, Max = 700, Rounding = 0,
+    Callback = function(v) Config.AimFOV = v AutoSaveConfig() end,
+})
 
 local KnifeBox = CombatTab:AddLeftGroupbox("Knife · Murderer", "sword")
 KnifeBox:AddToggle("AutoStab", {
@@ -910,6 +1083,18 @@ KnifeBox:AddToggle("KillAura", {
 KnifeBox:AddToggle("AutoKill", {
     Text = "Auto Kill Innocents", Default = false,
     Callback = function(v) Config.AutoKill = v AutoSaveConfig() end,
+})
+KnifeBox:AddToggle("AutoKillMurderer", {
+    Text = "Auto Kill Murderer", Default = false,
+    Callback = function(v) Config.AutoKillMurderer = v AutoSaveConfig() end,
+})
+KnifeBox:AddToggle("AutoKillSheriff", {
+    Text = "Auto Kill Sheriff", Default = false,
+    Callback = function(v) Config.AutoKillSheriff = v AutoSaveConfig() end,
+})
+KnifeBox:AddToggle("DodgeKnife", {
+    Text = "Dodge Knife", Default = false,
+    Callback = function(v) Config.DodgeKnife = v AutoSaveConfig() end,
 })
 KnifeBox:AddToggle("KillAll", {
     Text = "Kill All", Default = false,
@@ -938,15 +1123,6 @@ KnifeBox:AddToggle("AutoEquipKnife", {
     Text = "Auto Equip Knife", Default = true,
     Callback = function(v) Config.AutoEquipKnife = v AutoSaveConfig() end,
 })
-KnifeBox:AddToggle("ProximityKnife", {
-    Text = "Proximity Knife", Default = true,
-    Callback = function(v) Config.ProximityKnife = v AutoSaveConfig() end,
-})
-KnifeBox:AddSlider("KnifeProxDist", {
-    Text = "Knife Proximity Distance",
-    Default = 18, Min = 5, Max = 40, Rounding = 0, Suffix = " studs",
-    Callback = function(v) Config.KnifeProxDist = v AutoSaveConfig() end,
-})
 KnifeBox:AddButton("Kill All (Murderer Only)", function()
     local knife = equipTool("Knife")
     if not knife then
@@ -968,7 +1144,7 @@ KnifeBox:AddButton("Kill All (Murderer Only)", function()
     end
 end)
 
-local HitboxBox = CombatTab:AddRightGroupbox("Hitbox", "square")
+local HitboxBox = CombatTab:AddRightGroupbox("Hitbox / Godmode", "square")
 HitboxBox:AddToggle("HitboxExpander", {
     Text = "Hitbox Expander", Default = false,
     Callback = function(v)
@@ -995,7 +1171,29 @@ HitboxBox:AddSlider("HitboxTransparency", {
     Default = 60, Min = 0, Max = 100, Rounding = 0,
     Callback = function(v) Config.HitboxTransparency = v / 100 AutoSaveConfig() end,
 })
+HitboxBox:AddToggle("GodMode", {
+    Text = "God Mode", Default = false,
+    Callback = function(v)
+        Config.GodMode = v
+        if v then
+            task.spawn(function()
+                while Config.GodMode do
+                    task.wait(0.1)
+                    local h = getHumanoid(LP)
+                    if h then h.MaxHealth = math.huge h.Health = math.huge end
+                end
+            end)
+        else
+            local h = getHumanoid(LP)
+            if h then h.MaxHealth = 100 h.Health = 100 end
+        end
+        AutoSaveConfig()
+    end,
+})
 
+-- ============================================================
+-- MOVEMENT TAB
+-- ============================================================
 local MoveTab = Window:AddTab({
     Name = "Movement",
     Icon = "move",
@@ -1068,6 +1266,9 @@ SafeBox:AddToggle("AntiVoid", {
     Callback = function(v) Config.AntiVoid = v AutoSaveConfig() end,
 })
 
+-- ============================================================
+-- FARM TAB
+-- ============================================================
 local FarmTab = Window:AddTab({
     Name = "Farm",
     Icon = "coins",
@@ -1113,6 +1314,9 @@ FarmBox:AddSlider("CoinBagCap", {
     Callback = function(v) Config.CoinBagCap = v AutoSaveConfig() end,
 })
 
+-- ============================================================
+-- SURVIVAL TAB
+-- ============================================================
 local SurvTab = Window:AddTab({
     Name = "Survival",
     Icon = "shield",
@@ -1155,6 +1359,9 @@ SurvBox:AddToggle("AutoPlay", {
     Callback = function(v) Config.AutoPlay = v AutoSaveConfig() end,
 })
 
+-- ============================================================
+-- TELEPORTS TAB
+-- ============================================================
 local TPTab = Window:AddTab({
     Name = "Teleports",
     Icon = "map-pin",
@@ -1281,6 +1488,9 @@ SlotBox:AddButton("Go To Slot 2", function()
     end
 end)
 
+-- ============================================================
+-- TROLLING TAB
+-- ============================================================
 local TrollTab = Window:AddTab({
     Name = "Trolling",
     Icon = "smile",
@@ -1293,6 +1503,7 @@ FlingBox:AddButton("Fling Murderer", function()
     if m and m.Character then
         Library:Notify({ Title = "Riad Hub", Description = "Flinging " .. m.Name .. "...", Time = 2 })
         task.spawn(flingCharacter, m.Character)
+        SendWebhook("Fling", "Flinging murderer: " .. m.Name)
     else
         Library:Notify({ Title = "Riad Hub", Description = "Murderer not found.", Time = 2 })
     end
@@ -1349,6 +1560,24 @@ task.spawn(function()
     end
 end)
 
+-- ============================================================
+-- AUTO MODULES (new features)
+-- ============================================================
+local UnboxBox = Window:Tab({ Title = "Auto", Icon = "package", Description = "Auto systems" })
+
+UnboxBox:AddLeftGroupbox("Auto Systems", "package")
+UnboxBox:AddToggle("AutoUnbox", {
+    Text = "Auto Unbox", Default = false,
+    Callback = function(v) Config.AutoUnbox = v AutoSaveConfig() end,
+})
+UnboxBox:AddToggle("AutoPrestige", {
+    Text = "Auto Prestige", Default = false,
+    Callback = function(v) Config.AutoPrestige = v AutoSaveConfig() end,
+})
+
+-- ============================================================
+-- MISC TAB
+-- ============================================================
 local MiscTab = Window:AddTab({
     Name = "Misc",
     Icon = "settings",
@@ -1395,6 +1624,25 @@ SessionBox:AddButton("Copy Death List", function()
         setclipboard("MM2 Dead: " .. table.concat(State.DeadPlayers, ", "))
         Library:Notify({ Title = "Riad Hub", Description = "Copied.", Time = 2 })
     end
+end)
+
+local WebhookBox = MiscTab:AddLeftGroupbox("Webhook", "message-circle")
+WebhookBox:AddToggle("WebhookEnabled", {
+    Text = "Webhook Enabled", Default = false,
+    Callback = function(v) Config.WebhookEnabled = v AutoSaveConfig() end,
+})
+WebhookBox:AddInput("WebhookURL", {
+    Text = "Webhook URL",
+    Default = "",
+    Placeholder = "https://discord.com/api/webhooks/...",
+    Callback = function(v)
+        Config.WebhookURL = v
+        AutoSaveConfig()
+    end,
+})
+WebhookBox:AddButton("Send Test", function()
+    SendWebhook("Test", "Riad Hub webhook test.")
+    Library:Notify({ Title = "Riad Hub", Description = "Test sent.", Time = 2 })
 end)
 
 local ServerBox = MiscTab:AddRightGroupbox("Server", "server")
@@ -1472,6 +1720,9 @@ ServerBox:AddButton("Copy Place ID", function()
     end
 end)
 
+-- ============================================================
+-- INFO TAB
+-- ============================================================
 local InfoTab = Window:AddTab({
     Name = "Info",
     Icon = "info",
@@ -1573,12 +1824,16 @@ Window:LoadSettingsTab({
     ConfigSubFolder = "MM2",
 })
 
+-- ============================================================
+-- MAIN LOOP
+-- ============================================================
 local heartbeat = RunService.Heartbeat:Connect(function()
     local now = tick()
     local myChar = LP.Character
     local myRoot = getHRP(LP)
     local myHum  = getHumanoid(LP)
 
+    -- ESP
     if Config.RoleESP and myRoot then
         if now - State.LastESPRefresh > 0.066 then
             State.LastESPRefresh = now
@@ -1593,6 +1848,10 @@ local heartbeat = RunService.Heartbeat:Connect(function()
                             local txt  = p.Name
                             if Config.ESPNames then txt = "[" .. role .. "] " .. p.Name end
                             if Config.ESPDistance then txt = txt .. " (" .. dist .. ")" end
+                            if Config.PlayerStats then
+                                local h = getHumanoid(p)
+                                if h then txt = txt .. " " .. math.floor(h.Health) .. "hp" end
+                            end
                             getOrCreateBillboard("bb_" .. p.UserId, pRoot, txt, col)
                             if Config.ESPBoxes then getOrCreateBox("bx_" .. p.UserId, pRoot, col) end
                             if Config.ESPChams then getOrCreateCham(p.UserId, p.Character, col) end
@@ -1615,6 +1874,7 @@ local heartbeat = RunService.Heartbeat:Connect(function()
         clearCategory(State.Tracers)
     end
 
+    -- Item ESP
     if now - State.LastItemScan > 0.5 then
         State.LastItemScan = now
         clearCategory(State.ItemHighlights)
@@ -1644,6 +1904,19 @@ local heartbeat = RunService.Heartbeat:Connect(function()
         end
     end
 
+    -- Gun Tracker
+    updateGunTracker()
+
+    -- Auto TP to Gun
+    if Config.AutoTPGun and myRoot then
+        local gd = getGunDrop()
+        local gp = getGunDropPart(gd)
+        if gp and (myRoot.Position - gp.Position).Magnitude > 5 then
+            myRoot.CFrame = gp.CFrame * CFrame.new(0, 3, 0)
+        end
+    end
+
+    -- Aimbot
     if Config.Aimbot then
         local tgt = nearestTarget()
         if tgt then
@@ -1654,6 +1927,7 @@ local heartbeat = RunService.Heartbeat:Connect(function()
         end
     end
 
+    -- Fly
     if Config.Fly and State.flyBV then
         local move = Vector3.zero
         if UserInputService:IsKeyDown(Enum.KeyCode.W) then move += Camera.CFrame.LookVector end
@@ -1665,12 +1939,14 @@ local heartbeat = RunService.Heartbeat:Connect(function()
         State.flyBV.Velocity = move * Config.FlySpeed
     end
 
+    -- Noclip
     if Config.Noclip and myChar then
         for _, p in ipairs(myChar:GetDescendants()) do
             if p:IsA("BasePart") and p.CanCollide then p.CanCollide = false end
         end
     end
 
+    -- Speed / Jump
     if myHum then
         if Config.Speed then
             if myHum.WalkSpeed ~= Config.SpeedValue then myHum.WalkSpeed = Config.SpeedValue end
@@ -1682,6 +1958,7 @@ local heartbeat = RunService.Heartbeat:Connect(function()
         end
     end
 
+    -- Anti-Ragdoll
     if Config.AntiRagdoll and myHum then
         pcall(function()
             myHum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
@@ -1690,6 +1967,7 @@ local heartbeat = RunService.Heartbeat:Connect(function()
         myHum.PlatformStand = false
     end
 
+    -- Environment
     if Config.Fullbright then
         Lighting.Brightness = 2
         Lighting.ClockTime = 14
@@ -1698,6 +1976,7 @@ local heartbeat = RunService.Heartbeat:Connect(function()
     end
     if Config.NoFog then Lighting.FogEnd = 1e6 end
 
+    -- Anti-Fling / Anti-Void
     if myRoot and myHum then
         local velMag = myRoot.AssemblyLinearVelocity.Magnitude
         local angMag = myRoot.AssemblyAngularVelocity.Magnitude
@@ -1724,6 +2003,7 @@ local heartbeat = RunService.Heartbeat:Connect(function()
     updateAuraRing(myRoot)
     updateFOVCircle()
 
+    -- Auto-Shoot
     if Config.AutoShoot and myRoot and now - State.LastAutoShoot >= 0.5 then
         local m = select(1, getRolePlayers())
         if m and isAlive(m) then
@@ -1745,6 +2025,7 @@ local heartbeat = RunService.Heartbeat:Connect(function()
         end
     end
 
+    -- Kill Aura / Auto Kill
     if (Config.KillAura or Config.AutoKill or Config.AutoStab) and myRoot and now - State.LastKnifeTick >= 0.2 then
         local knife = equipTool("Knife")
         if knife then
@@ -1786,6 +2067,50 @@ local heartbeat = RunService.Heartbeat:Connect(function()
         end
     end
 
+    -- Auto Kill Murderer/Sheriff (as the opposing role)
+    if (Config.AutoKillMurderer or Config.AutoKillSheriff) and myRoot and now - State.LastKnifeTick >= 0.2 then
+        local target = nil
+        if Config.AutoKillMurderer then
+            target = select(1, getRolePlayers())
+        elseif Config.AutoKillSheriff then
+            target = select(2, getRolePlayers())
+        end
+        if target and isAlive(target) then
+            local knife = equipTool("Knife")
+            if knife then
+                local events = knife:FindFirstChild("Events")
+                if events then
+                    local tRoot = getHRP(target)
+                    if tRoot and (myRoot.Position - tRoot.Position).Magnitude <= Config.AuraRange then
+                        if events:FindFirstChild("HandleTouched") then
+                            events.HandleTouched:FireServer(tRoot)
+                            if events:FindFirstChild("KnifeStabbed") then
+                                events.KnifeStabbed:FireServer()
+                            end
+                            State.LastKnifeTick = now
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    -- Dodge Knife
+    if Config.DodgeKnife and myRoot and myHum then
+        local murderer = select(1, getRolePlayers())
+        if murderer and isAlive(murderer) then
+            local mRoot = getHRP(murderer)
+            if mRoot then
+                local dist = (myRoot.Position - mRoot.Position).Magnitude
+                if dist < Config.AuraRange and murderer.Character:FindFirstChild("Knife") then
+                    local away = (myRoot.Position - mRoot.Position).Unit
+                    myRoot.CFrame = myRoot.CFrame + Vector3.new(away.X * 1.5, 0, away.Z * 1.5)
+                end
+            end
+        end
+    end
+
+    -- Hitbox Expander
     if Config.HitboxExpander and now - State.LastHitboxTick > 0.1 then
         State.LastHitboxTick = now
         for _, p in ipairs(Players:GetPlayers()) do
@@ -1803,6 +2128,7 @@ local heartbeat = RunService.Heartbeat:Connect(function()
         end
     end
 
+    -- Full Gun Grabber
     if Config.GrabGunAuto and myRoot then
         local gd = getGunDrop()
         local gp = getGunDropPart(gd)
@@ -1811,6 +2137,7 @@ local heartbeat = RunService.Heartbeat:Connect(function()
         end
     end
 
+    -- Murderer Avoid / Follow
     local murderer = select(1, getRolePlayers())
     if myRoot and murderer and isAlive(murderer) then
         local mRoot = getHRP(murderer)
@@ -1844,6 +2171,7 @@ local heartbeat = RunService.Heartbeat:Connect(function()
         end
     end
 
+    -- Coin Farm
     if Config.CoinFarm and myRoot and now - State.LastFarmTick >= 0.05 then
         if Config.BagFullStop and getCurrentCoinCount() >= Config.CoinBagCap then
             Config.CoinFarm = false
@@ -1910,6 +2238,7 @@ local heartbeat = RunService.Heartbeat:Connect(function()
         end
     end
 
+    -- Auto Play
     if Config.AutoPlay and myRoot and myHum then
         local role = getRole(LP)
         if role == "Sheriff" then
@@ -1929,6 +2258,9 @@ end)
 
 table.insert(activeConnections, heartbeat)
 
+-- ============================================================
+-- DEATH TRACKING
+-- ============================================================
 local function hookDeath(p)
     if not p.Character then return end
     local h = p.Character:WaitForChild("Humanoid", 5)
@@ -1939,6 +2271,7 @@ local function hookDeath(p)
                 local r = getRole(p)
                 Library:Notify({ Title = "Death", Description = p.Name .. " [" .. r .. "]", Time = 3 })
             end
+            SendWebhook("Death", p.Name .. " [" .. getRole(p) .. "]")
         end)
     end
 end
@@ -1956,6 +2289,9 @@ Players.PlayerAdded:Connect(function(p)
     end
 end)
 
+-- ============================================================
+-- INPUT
+-- ============================================================
 table.insert(activeConnections, UserInputService.JumpRequest:Connect(function()
     if Config.InfiniteJump then
         local h = getHumanoid(LP)
@@ -1977,6 +2313,7 @@ table.insert(activeConnections, UserInputService.InputBegan:Connect(function(inp
         Config.FlingHeroPreRound = false
         Config.FlingAllPreRound = false
         Config.FlingSheriffDuringRound = false
+        Config.AutoTPGun = false
         Library:Notify({ Title = "Riad Hub", Description = "EMERGENCY STOP — features halted.", Time = 3 })
     end
 end))
@@ -1989,6 +2326,9 @@ table.insert(activeConnections, LP.Idled:Connect(function()
     end
 end))
 
+-- ============================================================
+-- UNLOAD
+-- ============================================================
 getgenv().RiadHub_Unload = function()
     State.SilentAimHookActive = false
     for _, c in ipairs(activeConnections) do
@@ -2001,6 +2341,8 @@ getgenv().RiadHub_Unload = function()
     for id in pairs(State.Tracers) do
         pcall(function() State.Tracers[id]:Remove() end)
     end
+    if gunTrackerBox then pcall(function() gunTrackerBox:Remove() end) end
+    if gunTrackerText then pcall(function() gunTrackerText:Remove() end) end
     if State.AuraRing then pcall(function() State.AuraRing:Destroy() end) State.AuraRing = nil end
     if State.FOVCircle then pcall(function() State.FOVCircle:Remove() end) State.FOVCircle = nil end
     for part, sz in pairs(State.OriginalHitboxSizes) do
@@ -2017,6 +2359,6 @@ end
 
 Library:Notify({
     Title = "Riad Hub",
-    Description = "Loaded. Press Right-Ctrl to toggle.",
+    Description = "Loaded. Right-Ctrl to toggle.",
     Time = 5,
 })
