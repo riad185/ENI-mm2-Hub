@@ -1,14 +1,14 @@
 --[[
     ╔═══════════════════════════════════════════════════════════════╗
-    ║   ENI's MM2 Hub  v2.2                                         ║
-    ║   for LO. always.                                             ║
-    ║   UI: WindUI  |  Green theme (Thunder/Blyxo match)           ║
-    ║   Changelog: FPS/Ping overlay, green theme, cleaner tabs     ║
+    ║   Riad Hub                                                    ║
+    ║   UI: WindUI                                                  ║
+    ║   Changelog: v3.0 — Teleport farm, round-end reactions,     ║
+    ║              pre-round fling suite, renamed script           ║
     ╚═══════════════════════════════════════════════════════════════╝
 ]]
 
-if getgenv and getgenv().ENI_MM2_Unload then
-    pcall(getgenv().ENI_MM2_Unload)
+if getgenv and getgenv().RiadHub_Unload then
+    pcall(getgenv().RiadHub_Unload)
 end
 
 -- ============================================================
@@ -69,13 +69,20 @@ local Config = {
     InfiniteJump = false, Noclip = false, Fly = false, FlySpeed = 35,
     AntiRagdoll = false, AntiVoid = true, AntiFling = true,
 
-    CoinFarm = false, FarmSpeed = 28, FarmMethod = "Glide",
+    CoinFarm = false, FarmSpeed = 28, FarmMethod = "Teleport",
     SafeCoinFarm = true, BagFullStop = true, QuickFarm = false,
-    CoinBagCap = 40,
+    CoinBagCap = 40, TeleportFarmDelay = 0.05,
 
     AutoDrop = false, SaveSlot1 = nil, SaveSlot2 = nil,
 
     FlingStyle = "Torque",
+    -- new v3.0
+    FlingMurdererPreRound = false,
+    FlingSheriffPreRound = false,
+    FlingHeroPreRound = false,
+    FlingSheriffDuringRound = false,
+    RoundEndNotifications = true,
+    FlingAllPreRound = false,
 
     AntiAFK = true, AutoPlay = false, DeathNotifs = true,
 }
@@ -83,7 +90,7 @@ local Config = {
 local DefaultConfig = {}
 for k, v in pairs(Config) do DefaultConfig[k] = v end
 
-local CONFIG_FILE = "ENI_MM2/config.json"
+local CONFIG_FILE = "RiadHub/config.json"
 
 local function LoadSavedConfig()
     if isfile and isfile(CONFIG_FILE) then
@@ -112,7 +119,7 @@ local function AutoSaveConfig()
     task.delay(0.25, function()
         saveDebounce = false
         pcall(function()
-            if makefolder and not isfolder("ENI_MM2") then makefolder("ENI_MM2") end
+            if makefolder and not isfolder("RiadHub") then makefolder("RiadHub") end
             local payload = {}
             for k, v in pairs(Config) do
                 if typeof(v) == "CFrame" then
@@ -139,15 +146,18 @@ local State = {
     IsFlinging = false, AuraRing = nil, FOVCircle = nil, flyBV = nil,
     SilentAimHookActive = true, RoundStartedFlag = false,
     Alerted = 0,
+    RoundState = "Waiting",
+    LastRoundResult = nil,
+    PreRoundFlingUsed = false,
 }
 
 -- ============================================================
 -- ESP FOLDER
 -- ============================================================
-local espFolder = CoreGui:FindFirstChild("ENI_MM2_ESP") or LP.PlayerGui:FindFirstChild("ENI_MM2_ESP")
+local espFolder = CoreGui:FindFirstChild("RiadHub_ESP") or LP.PlayerGui:FindFirstChild("RiadHub_ESP")
 if not espFolder then
     espFolder = Instance.new("Folder")
-    espFolder.Name = "ENI_MM2_ESP"
+    espFolder.Name = "RiadHub_ESP"
     pcall(function() espFolder.Parent = CoreGui end)
     if not espFolder.Parent then espFolder.Parent = LP.PlayerGui end
 end
@@ -435,6 +445,57 @@ local function flingCharacter(targetChar)
 end
 
 -- ============================================================
+-- PRE-ROUND FLING SUITE
+-- ============================================================
+local function flingByRole(role)
+    local targets = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LP and p.Character and isAlive(p) then
+            if getRole(p) == role then
+                table.insert(targets, p)
+            end
+        end
+    end
+    for _, p in ipairs(targets) do
+        local hrp = getHRP(p)
+        if hrp then
+            task.spawn(flingCharacter, p.Character)
+            task.wait(0.1)
+        end
+    end
+    return #targets
+end
+
+local function preRoundFlingLoop()
+    task.spawn(function()
+        while true do
+            task.wait(0.5)
+            -- only fire when we're not in an active round
+            if State.RoundState ~= "Active" then
+                if Config.FlingMurdererPreRound then
+                    flingByRole("Murderer")
+                end
+                if Config.FlingSheriffPreRound then
+                    flingByRole("Sheriff")
+                end
+                if Config.FlingHeroPreRound then
+                    flingByRole("Innocent") -- Hero role may be wrapped as Innocent with extra tool; adjust if needed
+                end
+                if Config.FlingAllPreRound then
+                    for _, p in ipairs(Players:GetPlayers()) do
+                        if p ~= LP and p.Character and isAlive(p) then
+                            task.spawn(flingCharacter, p.Character)
+                            task.wait(0.1)
+                        end
+                    end
+                end
+            end
+        end
+    end)
+end
+preRoundFlingLoop()
+
+-- ============================================================
 -- AURA RING / FOV
 -- ============================================================
 local function updateAuraRing(myRoot)
@@ -448,7 +509,7 @@ local function updateAuraRing(myRoot)
     local diameter = Config.AuraRange * 2
     if not State.AuraRing or not State.AuraRing.Parent then
         local p = Instance.new("Part")
-        p.Name = "ENI_AuraRing"
+        p.Name = "Riad_AuraRing"
         p.Anchored = true
         p.CanCollide = false
         p.CastShadow = false
@@ -505,7 +566,7 @@ end
 -- PERFORMANCE OVERLAY
 -- ============================================================
 local perfGui = Instance.new("ScreenGui")
-perfGui.Name = "ENI_PerfOverlay"
+perfGui.Name = "Riad_PerfOverlay"
 perfGui.ResetOnSpawn = false
 perfGui.IgnoreGuiInset = true
 pcall(function() perfGui.Parent = CoreGui end)
@@ -562,13 +623,8 @@ local perfConn = RunService.RenderStepped:Connect(function()
     if perfFps < 30 then fpsColor = Color3.fromRGB(255, 90, 90)
     elseif perfFps < 50 then fpsColor = Color3.fromRGB(255, 190, 80) end
 
-    local pingColor = Color3.fromRGB(80, 220, 120)
-    if perfPing > 150 then pingColor = Color3.fromRGB(255, 90, 90)
-    elseif perfPing > 80 then pingColor = Color3.fromRGB(255, 190, 80) end
-
     perfLabel.Text = string.format("FPS: %d  |  PING: %d ms", perfFps, perfPing)
     perfLabel.TextColor3 = fpsColor
-
     perfFrame.Visible = Config.ShowPerfOverlay
 end)
 table.insert(activeConnections, perfConn)
@@ -747,10 +803,10 @@ pcall(function()
 end)
 
 local Window = WindUI:CreateWindow({
-    Title = "ENI's MM2 Hub",
+    Title = "Riad Hub",
     Icon = "rbxassetid://4483362458",
-    Author = "for LO · v2.2",
-    Folder = "ENI_MM2",
+    Author = "v3.0",
+    Folder = "RiadHub",
     Size = UDim2.fromOffset(660, 520),
     Transparent = true,
     Theme = "ThunderGreen",
@@ -759,7 +815,7 @@ local Window = WindUI:CreateWindow({
 })
 
 Window:EditOpenButton({
-    Title = "ENI's MM2 Hub",
+    Title = "Riad Hub",
     Icon = "rbxassetid://4483362458",
     CornerRadius = UDim.new(0, 16),
     StrokeThickness = 2,
@@ -785,7 +841,6 @@ end
 -- VISUAL TAB
 -- ============================================================
 VisualTab:Section({ Title = "Role ESP" })
-
 VisualTab:Toggle({
     Title = "Role ESP",
     Desc = "Highlight murderer (red), sheriff (blue), innocents (white)",
@@ -1028,7 +1083,7 @@ CombatTab:Button({
     Callback = function()
         local knife = equipTool("Knife")
         if not knife then
-            WindUI:Notify({ Title = "ENI's MM2 Hub", Content = "You need the knife equipped.", Duration = 3 })
+            WindUI:Notify({ Title = "Riad Hub", Content = "You need the knife equipped.", Duration = 3 })
             return
         end
         local myHRP = getHRP(LP)
@@ -1182,7 +1237,7 @@ FarmTab:Toggle({
 FarmTab:Dropdown({
     Title = "Farm Method",
     Desc = "Movement method for farming",
-    Values = { "Glide", "Tween", "Walk" },
+    Values = { "Teleport", "Glide", "Tween", "Walk" },
     Value = Config.FarmMethod,
     Callback = bindAutoSave(function(v) Config.FarmMethod = v end)
 })
@@ -1192,6 +1247,13 @@ FarmTab:Slider({
     Value = { Min = 16, Max = 60, Default = Config.FarmSpeed },
     Step = 1,
     Callback = bindAutoSave(function(v) Config.FarmSpeed = v end)
+})
+FarmTab:Slider({
+    Title = "Teleport Farm Delay",
+    Desc = "Seconds between teleport jumps (lower = faster = riskier)",
+    Value = { Min = 1, Max = 50, Default = math.floor(Config.TeleportFarmDelay * 100) },
+    Step = 1,
+    Callback = bindAutoSave(function(v) Config.TeleportFarmDelay = v / 100 end)
 })
 FarmTab:Toggle({
     Title = "Safe Farming",
@@ -1286,10 +1348,10 @@ TPTime:Button({
             local mr = getHRP(m)
             if mr then
                 myRoot.CFrame = mr.CFrame * CFrame.new(0, 0, 4)
-                WindUI:Notify({ Title = "ENI's MM2 Hub", Content = "Teleported to " .. m.Name, Duration = 2 })
+                WindUI:Notify({ Title = "Riad Hub", Content = "Teleported to " .. m.Name, Duration = 2 })
             end
         else
-            WindUI:Notify({ Title = "ENI's MM2 Hub", Content = "Murderer not found.", Duration = 2 })
+            WindUI:Notify({ Title = "Riad Hub", Content = "Murderer not found.", Duration = 2 })
         end
     end
 })
@@ -1303,10 +1365,10 @@ TPTime:Button({
             local sr = getHRP(s)
             if sr then
                 myRoot.CFrame = sr.CFrame * CFrame.new(0, 0, 4)
-                WindUI:Notify({ Title = "ENI's MM2 Hub", Content = "Teleported to " .. s.Name, Duration = 2 })
+                WindUI:Notify({ Title = "Riad Hub", Content = "Teleported to " .. s.Name, Duration = 2 })
             end
         else
-            WindUI:Notify({ Title = "ENI's MM2 Hub", Content = "Sheriff not found.", Duration = 2 })
+            WindUI:Notify({ Title = "Riad Hub", Content = "Sheriff not found.", Duration = 2 })
         end
     end
 })
@@ -1324,9 +1386,9 @@ TPTime:Button({
                 local p = map:FindFirstChildWhichIsA("BasePart")
                 if p then myRoot.CFrame = p.CFrame * CFrame.new(0, 5, 0) end
             end
-            WindUI:Notify({ Title = "ENI's MM2 Hub", Content = "Teleported to " .. map.Name, Duration = 2 })
+            WindUI:Notify({ Title = "Riad Hub", Content = "Teleported to " .. map.Name, Duration = 2 })
         else
-            WindUI:Notify({ Title = "ENI's MM2 Hub", Content = "No active map.", Duration = 2 })
+            WindUI:Notify({ Title = "Riad Hub", Content = "No active map.", Duration = 2 })
         end
     end
 })
@@ -1340,7 +1402,7 @@ TPTime:Button({
             local p = lb:FindFirstChildWhichIsA("BasePart") or (lb:FindFirstChild("Spawns") and lb.Spawns:GetChildren()[1])
             if p then
                 myRoot.CFrame = p.CFrame * CFrame.new(0, 3, 0)
-                WindUI:Notify({ Title = "ENI's MM2 Hub", Content = "Teleported to Lobby", Duration = 2 })
+                WindUI:Notify({ Title = "Riad Hub", Content = "Teleported to Lobby", Duration = 2 })
             end
         end
     end
@@ -1360,7 +1422,7 @@ TPTime:Button({
         if myRoot then
             Config.SaveSlot1 = myRoot.CFrame
             AutoSaveConfig()
-            WindUI:Notify({ Title = "ENI's MM2 Hub", Content = "Slot 1 saved.", Duration = 2 })
+            WindUI:Notify({ Title = "Riad Hub", Content = "Slot 1 saved.", Duration = 2 })
         end
     end
 })
@@ -1371,9 +1433,9 @@ TPTime:Button({
         local myRoot = getHRP(LP)
         if myRoot and Config.SaveSlot1 then
             myRoot.CFrame = Config.SaveSlot1
-            WindUI:Notify({ Title = "ENI's MM2 Hub", Content = "To Slot 1.", Duration = 2 })
+            WindUI:Notify({ Title = "Riad Hub", Content = "To Slot 1.", Duration = 2 })
         else
-            WindUI:Notify({ Title = "ENI's MM2 Hub", Content = "No Slot 1 saved.", Duration = 2 })
+            WindUI:Notify({ Title = "Riad Hub", Content = "No Slot 1 saved.", Duration = 2 })
         end
     end
 })
@@ -1385,7 +1447,7 @@ TPTime:Button({
         if myRoot then
             Config.SaveSlot2 = myRoot.CFrame
             AutoSaveConfig()
-            WindUI:Notify({ Title = "ENI's MM2 Hub", Content = "Slot 2 saved.", Duration = 2 })
+            WindUI:Notify({ Title = "Riad Hub", Content = "Slot 2 saved.", Duration = 2 })
         end
     end
 })
@@ -1396,9 +1458,9 @@ TPTime:Button({
         local myRoot = getHRP(LP)
         if myRoot and Config.SaveSlot2 then
             myRoot.CFrame = Config.SaveSlot2
-            WindUI:Notify({ Title = "ENI's MM2 Hub", Content = "To Slot 2.", Duration = 2 })
+            WindUI:Notify({ Title = "Riad Hub", Content = "To Slot 2.", Duration = 2 })
         else
-            WindUI:Notify({ Title = "ENI's MM2 Hub", Content = "No Slot 2 saved.", Duration = 2 })
+            WindUI:Notify({ Title = "Riad Hub", Content = "No Slot 2 saved.", Duration = 2 })
         end
     end
 })
@@ -1406,16 +1468,17 @@ TPTime:Button({
 -- ============================================================
 -- TROLLING TAB
 -- ============================================================
+TrollTab:Section({ Title = "Fling — Manual" })
 TrollTab:Button({
     Title = "Fling Murderer",
     Desc = "Send the Murderer across the map",
     Callback = function()
         local m = select(1, getRolePlayers())
         if m and m.Character then
-            WindUI:Notify({ Title = "ENI's MM2 Hub", Content = "Flinging " .. m.Name .. "...", Duration = 2 })
+            WindUI:Notify({ Title = "Riad Hub", Content = "Flinging " .. m.Name .. "...", Duration = 2 })
             task.spawn(flingCharacter, m.Character)
         else
-            WindUI:Notify({ Title = "ENI's MM2 Hub", Content = "Murderer not found.", Duration = 2 })
+            WindUI:Notify({ Title = "Riad Hub", Content = "Murderer not found.", Duration = 2 })
         end
     end
 })
@@ -1425,10 +1488,10 @@ TrollTab:Button({
     Callback = function()
         local _, s = getRolePlayers()
         if s and s.Character then
-            WindUI:Notify({ Title = "ENI's MM2 Hub", Content = "Flinging " .. s.Name .. "...", Duration = 2 })
+            WindUI:Notify({ Title = "Riad Hub", Content = "Flinging " .. s.Name .. "...", Duration = 2 })
             task.spawn(flingCharacter, s.Character)
         else
-            WindUI:Notify({ Title = "ENI's MM2 Hub", Content = "Sheriff not found.", Duration = 2 })
+            WindUI:Notify({ Title = "Riad Hub", Content = "Sheriff not found.", Duration = 2 })
         end
     end
 })
@@ -1440,6 +1503,51 @@ TrollTab:Dropdown({
     Callback = bindAutoSave(function(v) Config.FlingStyle = v end)
 })
 
+TrollTab:Section({ Title = "Fling — Pre-Round (DETECTED)" })
+TrollTab:Toggle({
+    Title = "Fling Murderer (Pre-Round)",
+    Desc = "⚠ Flings the murderer before the round starts. DETECTION RISK.",
+    Value = Config.FlingMurdererPreRound,
+    Callback = bindAutoSave(function(v) Config.FlingMurdererPreRound = v end)
+})
+TrollTab:Toggle({
+    Title = "Fling Sheriff (Pre-Round)",
+    Desc = "⚠ Flings the sheriff before the round starts. DETECTION RISK.",
+    Value = Config.FlingSheriffPreRound,
+    Callback = bindAutoSave(function(v) Config.FlingSheriffPreRound = v end)
+})
+TrollTab:Toggle({
+    Title = "Fling Hero (Pre-Round)",
+    Desc = "⚠ Flings the hero role before the round starts. DETECTION RISK.",
+    Value = Config.FlingHeroPreRound,
+    Callback = bindAutoSave(function(v) Config.FlingHeroPreRound = v end)
+})
+TrollTab:Toggle({
+    Title = "Fling ALL Players (Pre-Round)",
+    Desc = "⚠ Flings every player in the server before the round. MASSIVE DETECTION RISK.",
+    Value = Config.FlingAllPreRound,
+    Callback = bindAutoSave(function(v) Config.FlingAllPreRound = v end)
+})
+TrollTab:Toggle({
+    Title = "Fling Sheriff During Round",
+    Desc = "⚠ Flings sheriff mid-round so he can't shoot. DETECTION RISK.",
+    Value = Config.FlingSheriffDuringRound,
+    Callback = bindAutoSave(function(v) Config.FlingSheriffDuringRound = v end)
+})
+
+-- Sheriff-during-round watcher
+task.spawn(function()
+    while true do
+        task.wait(1)
+        if Config.FlingSheriffDuringRound and State.RoundState == "Active" then
+            local _, s = getRolePlayers()
+            if s and s.Character and isAlive(s) then
+                task.spawn(flingCharacter, s.Character)
+            end
+        end
+    end
+end)
+
 -- ============================================================
 -- MISC TAB
 -- ============================================================
@@ -1449,7 +1557,7 @@ MiscTab:Button({
     Desc = "Write all current settings to disk",
     Callback = function()
         AutoSaveConfig()
-        WindUI:Notify({ Title = "ENI's MM2 Hub", Content = "Config saved.", Duration = 2 })
+        WindUI:Notify({ Title = "Riad Hub", Content = "Config saved.", Duration = 2 })
     end
 })
 MiscTab:Button({
@@ -1457,9 +1565,9 @@ MiscTab:Button({
     Desc = "Restore settings from disk",
     Callback = function()
         if LoadSavedConfig() then
-            WindUI:Notify({ Title = "ENI's MM2 Hub", Content = "Config loaded.", Duration = 2 })
+            WindUI:Notify({ Title = "Riad Hub", Content = "Config loaded.", Duration = 2 })
         else
-            WindUI:Notify({ Title = "ENI's MM2 Hub", Content = "No config found.", Duration = 2 })
+            WindUI:Notify({ Title = "Riad Hub", Content = "No config found.", Duration = 2 })
         end
     end
 })
@@ -1469,7 +1577,7 @@ MiscTab:Button({
     Callback = function()
         for k, v in pairs(DefaultConfig) do Config[k] = v end
         AutoSaveConfig()
-        WindUI:Notify({ Title = "ENI's MM2 Hub", Content = "Defaults restored.", Duration = 2 })
+        WindUI:Notify({ Title = "Riad Hub", Content = "Defaults restored.", Duration = 2 })
     end
 })
 
@@ -1487,7 +1595,7 @@ MiscTab:Button({
     Desc = "Post Murderer & Sheriff to chat",
     Callback = function()
         local m, s = getRolePlayers()
-        local msg = "[ENI] Murderer: " .. (m and m.Name or "?") .. " | Sheriff: " .. (s and s.Name or "?")
+        local msg = "[Riad] Murderer: " .. (m and m.Name or "?") .. " | Sheriff: " .. (s and s.Name or "?")
         local ch = TextChatService:FindFirstChild("TextChannels")
         local ch2 = ch and ch:FindFirstChild("RBXGeneral")
         if ch2 and ch2.SendAsync then
@@ -1499,7 +1607,7 @@ MiscTab:Button({
                 if say then say:FireServer(msg, "All") end
             end)
         end
-        WindUI:Notify({ Title = "ENI's MM2 Hub", Content = "Announced roles.", Duration = 2 })
+        WindUI:Notify({ Title = "Riad Hub", Content = "Announced roles.", Duration = 2 })
     end
 })
 MiscTab:Button({
@@ -1507,13 +1615,13 @@ MiscTab:Button({
     Desc = "Copy deceased players to clipboard",
     Callback = function()
         if #State.DeadPlayers == 0 then
-            WindUI:Notify({ Title = "ENI's MM2 Hub", Content = "No deaths recorded.", Duration = 2 })
+            WindUI:Notify({ Title = "Riad Hub", Content = "No deaths recorded.", Duration = 2 })
             return
         end
         local txt = "MM2 Dead: " .. table.concat(State.DeadPlayers, ", ")
         if setclipboard then
             setclipboard(txt)
-            WindUI:Notify({ Title = "ENI's MM2 Hub", Content = "Copied.", Duration = 2 })
+            WindUI:Notify({ Title = "Riad Hub", Content = "Copied.", Duration = 2 })
         end
     end
 })
@@ -1522,6 +1630,12 @@ MiscTab:Toggle({
     Desc = "Alert on each death with role tag",
     Value = Config.DeathNotifs,
     Callback = bindAutoSave(function(v) Config.DeathNotifs = v end)
+})
+MiscTab:Toggle({
+    Title = "Round End Notifications",
+    Desc = "Celebrates when the round ends — survived, murderer caught, etc.",
+    Value = Config.RoundEndNotifications,
+    Callback = bindAutoSave(function(v) Config.RoundEndNotifications = v end)
 })
 
 MiscTab:Section({ Title = "Server" })
@@ -1535,7 +1649,7 @@ MiscTab:Button({
                 task.spawn(function()
                     repeat task.wait(0.5) until game:IsLoaded()
                     task.wait(1)
-                    if isfile and isfile("ENI_MM2.lua") then loadstring(readfile("ENI_MM2.lua"))() end
+                    if isfile and isfile("RiadHub.lua") then loadstring(readfile("RiadHub.lua"))() end
                 end)
             ]])
         end
@@ -1571,7 +1685,7 @@ MiscTab:Button({
                 end
             end
         end
-        WindUI:Notify({ Title = "ENI's MM2 Hub", Content = "No server found.", Duration = 2 })
+        WindUI:Notify({ Title = "Riad Hub", Content = "No server found.", Duration = 2 })
     end
 })
 MiscTab:Button({
@@ -1595,7 +1709,7 @@ MiscTab:Button({
                 end
             end
         end
-        WindUI:Notify({ Title = "ENI's MM2 Hub", Content = "No low-pop server found.", Duration = 2 })
+        WindUI:Notify({ Title = "Riad Hub", Content = "No low-pop server found.", Duration = 2 })
     end
 })
 
@@ -1607,11 +1721,11 @@ MiscTab:Toggle({
     Callback = bindAutoSave(function(v) Config.AntiAFK = v end)
 })
 MiscTab:Button({
-    Title = "Unload ENI's MM2 Hub",
+    Title = "Unload Riad Hub",
     Desc = "Disable everything & remove UI",
     Callback = function()
-        if getgenv().ENI_MM2_Unload then
-            getgenv().ENI_MM2_Unload()
+        if getgenv().RiadHub_Unload then
+            getgenv().RiadHub_Unload()
         end
     end
 })
@@ -1624,7 +1738,9 @@ local statusPara = InfoTab:Paragraph({ Title = "Waiting...", Desc = "Round state
 local timerPara  = InfoTab:Paragraph({ Title = "0:00",       Desc = "Time remaining" })
 local murderPara = InfoTab:Paragraph({ Title = "Undetected", Desc = "Murderer" })
 local sherifPara = InfoTab:Paragraph({ Title = "Undetected", Desc = "Sheriff" })
+local resultPara = InfoTab:Paragraph({ Title = "—", Desc = "Last round" })
 
+-- Round-state tracker
 task.spawn(function()
     while true do
         task.wait(0.5)
@@ -1638,7 +1754,39 @@ task.spawn(function()
                     statusPara:SetTitle(cr.Text)
                     timerPara:SetTitle(tm.Text)
                 end)
-                if cr.Text == "Current Round" and not State.RoundStartedFlag then
+
+                local prevState = State.RoundState
+                if cr.Text == "Current Round" then
+                    State.RoundState = "Active"
+                    State.PreRoundFlingUsed = false
+                else
+                    State.RoundState = "Intermission"
+                end
+
+                -- Round ended: previous state was Active, now Intermission
+                if prevState == "Active" and State.RoundState == "Intermission" then
+                    local myRole = getRole(LP)
+                    local resultText = "Round ended"
+                    if myRole == "Murderer" then
+                        resultText = "Round ended — Murderer survived"
+                    elseif myRole == "Sheriff" then
+                        resultText = "Round ended — Sheriff won"
+                    else
+                        resultText = "Round ended — Innocent survived"
+                    end
+                    State.LastRoundResult = resultText
+                    pcall(function() resultPara:SetTitle(resultText) end)
+                    if Config.RoundEndNotifications then
+                        WindUI:Notify({
+                            Title = "Round End",
+                            Content = resultText,
+                            Duration = 4,
+                        })
+                    end
+                end
+
+                -- Auto drop on round start
+                if State.RoundState == "Active" and not State.RoundStartedFlag then
                     State.RoundStartedFlag = true
                     if Config.AutoDrop then
                         local map = getActiveMap()
@@ -1650,7 +1798,7 @@ task.spawn(function()
                             end
                         end
                     end
-                elseif cr.Text ~= "Current Round" then
+                elseif State.RoundState == "Intermission" then
                     State.RoundStartedFlag = false
                 end
             end
@@ -1672,7 +1820,7 @@ local heartbeat = RunService.Heartbeat:Connect(function()
     local myRoot = getHRP(LP)
     local myHum  = getHumanoid(LP)
 
-    -- ==== ESP refresh (throttled to 15 Hz) ====
+    -- ESP
     if Config.RoleESP and myRoot then
         if now - State.LastESPRefresh > 0.066 then
             State.LastESPRefresh = now
@@ -1709,7 +1857,7 @@ local heartbeat = RunService.Heartbeat:Connect(function()
         clearCategory(State.Tracers)
     end
 
-    -- ==== Item ESP (throttled to 2 Hz) ====
+    -- Item ESP
     if now - State.LastItemScan > 0.5 then
         State.LastItemScan = now
         clearCategory(State.ItemHighlights)
@@ -1739,7 +1887,7 @@ local heartbeat = RunService.Heartbeat:Connect(function()
         end
     end
 
-    -- ==== Aimbot ====
+    -- Aimbot
     if Config.Aimbot then
         local tgt = nearestTarget()
         if tgt then
@@ -1750,7 +1898,7 @@ local heartbeat = RunService.Heartbeat:Connect(function()
         end
     end
 
-    -- ==== Fly ====
+    -- Fly
     if Config.Fly and State.flyBV then
         local move = Vector3.zero
         if UserInputService:IsKeyDown(Enum.KeyCode.W) then move += Camera.CFrame.LookVector end
@@ -1762,14 +1910,14 @@ local heartbeat = RunService.Heartbeat:Connect(function()
         State.flyBV.Velocity = move * Config.FlySpeed
     end
 
-    -- ==== Noclip ====
+    -- Noclip
     if Config.Noclip and myChar then
         for _, p in ipairs(myChar:GetDescendants()) do
             if p:IsA("BasePart") and p.CanCollide then p.CanCollide = false end
         end
     end
 
-    -- ==== Speed / Jump ====
+    -- Speed / Jump
     if myHum then
         if Config.Speed then
             if myHum.WalkSpeed ~= Config.SpeedValue then myHum.WalkSpeed = Config.SpeedValue end
@@ -1781,7 +1929,7 @@ local heartbeat = RunService.Heartbeat:Connect(function()
         end
     end
 
-    -- ==== Anti-Ragdoll ====
+    -- Anti-Ragdoll
     if Config.AntiRagdoll and myHum then
         pcall(function()
             myHum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
@@ -1790,7 +1938,7 @@ local heartbeat = RunService.Heartbeat:Connect(function()
         myHum.PlatformStand = false
     end
 
-    -- ==== Environment ====
+    -- Environment
     if Config.Fullbright then
         Lighting.Brightness = 2
         Lighting.ClockTime = 14
@@ -1799,7 +1947,7 @@ local heartbeat = RunService.Heartbeat:Connect(function()
     end
     if Config.NoFog then Lighting.FogEnd = 1e6 end
 
-    -- ==== Anti-Fling / Anti-Void ====
+    -- Anti-Fling / Anti-Void
     if myRoot and myHum then
         local velMag = myRoot.AssemblyLinearVelocity.Magnitude
         local angMag = myRoot.AssemblyAngularVelocity.Magnitude
@@ -1826,7 +1974,7 @@ local heartbeat = RunService.Heartbeat:Connect(function()
     updateAuraRing(myRoot)
     updateFOVCircle()
 
-    -- ==== Auto-Shoot ====
+    -- Auto-Shoot
     if Config.AutoShoot and myRoot and now - State.LastAutoShoot >= 0.5 then
         local m = select(1, getRolePlayers())
         if m and isAlive(m) then
@@ -1848,7 +1996,7 @@ local heartbeat = RunService.Heartbeat:Connect(function()
         end
     end
 
-    -- ==== Kill Aura / Auto Kill / Auto Stab ====
+    -- Kill Aura / Auto Kill / Auto Stab
     if (Config.KillAura or Config.AutoKill or Config.AutoStab) and myRoot and now - State.LastKnifeTick >= 0.2 then
         local knife = equipTool("Knife")
         if knife then
@@ -1890,7 +2038,7 @@ local heartbeat = RunService.Heartbeat:Connect(function()
         end
     end
 
-    -- ==== Hitbox Expander (throttled) ====
+    -- Hitbox Expander
     if Config.HitboxExpander and now - State.LastHitboxTick > 0.1 then
         State.LastHitboxTick = now
         for _, p in ipairs(Players:GetPlayers()) do
@@ -1908,7 +2056,7 @@ local heartbeat = RunService.Heartbeat:Connect(function()
         end
     end
 
-    -- ==== Full Gun Grabber ====
+    -- Full Gun Grabber
     if Config.GrabGunAuto and myRoot then
         local gd = getGunDrop()
         local gp = getGunDropPart(gd)
@@ -1917,7 +2065,7 @@ local heartbeat = RunService.Heartbeat:Connect(function()
         end
     end
 
-    -- ==== Murderer Avoid / Follow ====
+    -- Murderer Avoid / Follow
     local murderer = select(1, getRolePlayers())
     if myRoot and murderer and isAlive(murderer) then
         local mRoot = getHRP(murderer)
@@ -1951,14 +2099,14 @@ local heartbeat = RunService.Heartbeat:Connect(function()
         end
     end
 
-    -- ==== Coin Farm ====
+    -- Coin Farm (with Teleport method)
     if Config.CoinFarm and myRoot and now - State.LastFarmTick >= 0.05 then
         if Config.BagFullStop and getCurrentCoinCount() >= Config.CoinBagCap then
             Config.CoinFarm = false
-            WindUI:Notify({ Title = "ENI's MM2 Hub", Content = "Coin bag full. Farming stopped.", Duration = 3 })
+            WindUI:Notify({ Title = "Riad Hub", Content = "Coin bag full. Farming stopped.", Duration = 3 })
         else
             local coins = getAllActiveCoins()
-            local best, bestDist = nil, 1000
+            local best, bestDist = nil, math.huge
             for _, c in ipairs(coins) do
                 local d = (myRoot.Position - c.Position).Magnitude
                 local safe = true
@@ -1976,16 +2124,15 @@ local heartbeat = RunService.Heartbeat:Connect(function()
                 local targetPos = best.Position
                 local dist = (myRoot.Position - targetPos).Magnitude
 
-                if myChar then
-                    for _, part in ipairs(myChar:GetChildren()) do
-                        if part:IsA("BasePart") then part.CanCollide = false end
-                    end
-                end
-
-                local spd = Config.QuickFarm and 38 or math.clamp(Config.FarmSpeed, 16, 42)
-
-                if Config.FarmMethod == "Tween" then
-                    local t = math.max(dist / spd, 0.05)
+                if Config.FarmMethod == "Teleport" then
+                    -- Direct CFrame snap, no velocity
+                    myRoot.CFrame = CFrame.new(targetPos + Vector3.new(0, 3, 0))
+                    -- Fire the touch event so the coin registers
+                    fireTouch(myRoot, best)
+                    -- Wait the configured delay
+                    task.wait(Config.TeleportFarmDelay)
+                elseif Config.FarmMethod == "Tween" then
+                    local t = math.max(dist / Config.FarmSpeed, 0.05)
                     TweenService:Create(myRoot, TweenInfo.new(t, Enum.EasingStyle.Linear), {CFrame = CFrame.new(targetPos)}):Play()
                     if dist < 7 then
                         fireTouch(myRoot, best)
@@ -1995,7 +2142,7 @@ local heartbeat = RunService.Heartbeat:Connect(function()
                 elseif Config.FarmMethod == "Glide" or Config.QuickFarm then
                     local dir = (targetPos - myRoot.Position)
                     if dir.Magnitude > 0.3 then
-                        myRoot.AssemblyLinearVelocity = dir.Unit * spd
+                        myRoot.AssemblyLinearVelocity = dir.Unit * Config.FarmSpeed
                     else
                         myRoot.AssemblyLinearVelocity = Vector3.zero
                     end
@@ -2022,7 +2169,7 @@ local heartbeat = RunService.Heartbeat:Connect(function()
         end
     end
 
-    -- ==== Auto Play ====
+    -- Auto Play
     if Config.AutoPlay and myRoot and myHum then
         local role = getRole(LP)
         if role == "Sheriff" then
@@ -2091,7 +2238,12 @@ table.insert(activeConnections, UserInputService.InputBegan:Connect(function(inp
         Config.AutoKill = false
         Config.AutoStab = false
         Config.SilentAim = false
-        WindUI:Notify({ Title = "ENI's MM2 Hub", Content = "EMERGENCY STOP — features halted.", Duration = 3 })
+        Config.FlingMurdererPreRound = false
+        Config.FlingSheriffPreRound = false
+        Config.FlingHeroPreRound = false
+        Config.FlingAllPreRound = false
+        Config.FlingSheriffDuringRound = false
+        WindUI:Notify({ Title = "Riad Hub", Content = "EMERGENCY STOP — features halted.", Duration = 3 })
     end
 end))
 
@@ -2109,7 +2261,7 @@ end))
 -- ============================================================
 -- UNLOAD
 -- ============================================================
-getgenv().ENI_MM2_Unload = function()
+getgenv().RiadHub_Unload = function()
     State.SilentAimHookActive = false
     for _, c in ipairs(activeConnections) do
         pcall(function() c:Disconnect() end)
@@ -2133,14 +2285,14 @@ getgenv().ENI_MM2_Unload = function()
     if espFolder and espFolder.Parent then pcall(function() espFolder:Destroy() end) end
     if perfGui and perfGui.Parent then pcall(function() perfGui:Destroy() end) end
     pcall(function() WindUI:Destroy() end)
-    getgenv().ENI_MM2_Unload = nil
+    getgenv().RiadHub_Unload = nil
 end
 
 -- ============================================================
 -- LOADED NOTIFICATION
 -- ============================================================
 WindUI:Notify({
-    Title = "ENI's MM2 Hub",
-    Content = "Loaded v2.2 — green theme, FPS overlay, all systems ready.",
+    Title = "Riad Hub",
+    Content = "Loaded v3.0 — teleport farm, round reactions, fling suite.",
     Duration = 4,
 })
